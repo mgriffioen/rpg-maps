@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -332,9 +333,18 @@ private fun MapControlBar(viewModel: MapViewModel) {
                 }
                 // Only meaningful while frozen, and kept next to the toggle it
                 // belongs to rather than stranded on the other row.
+                //
+                // AssistChip rather than a button so it matches the two chips
+                // either side of it: same 32dp height, shape and outline. A
+                // FilterChip would look identical but announce itself as a
+                // toggle to accessibility services, and this is a one-shot
+                // action -- there is no "pushed" state to be in.
                 if (viewModel.tvFrozen) {
                     BarItem {
-                        OutlinedButton(onClick = viewModel::pushViewToTv) { Text("Push view") }
+                        AssistChip(
+                            onClick = viewModel::pushViewToTv,
+                            label = { Text("Push view") },
+                        )
                     }
                 }
                 BarItem {
