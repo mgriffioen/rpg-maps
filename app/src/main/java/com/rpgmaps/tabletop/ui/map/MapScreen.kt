@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -289,61 +290,82 @@ private fun MapControlBar(viewModel: MapViewModel) {
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            /*
-             * FlowRow rather than a horizontally scrolling Row. Held in
-             * portrait the old bar ran off the side, which put "Reveal all"
-             * and the TV controls behind a sideways scroll -- exactly the
-             * things you reach for mid-encounter without looking.
-             */
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                ToolChip("Pan", Icons.Default.PanTool, viewModel.tool == MapTool.PAN) {
-                    viewModel.tool = MapTool.PAN
+            // Row one: what a finger does, undoing it, and what the TV is up to.
+            ControlRow {
+                BarItem {
+                    ToolChip("Pan", Icons.Default.PanTool, viewModel.tool == MapTool.PAN) {
+                        viewModel.tool = MapTool.PAN
+                    }
                 }
-                ToolChip("Reveal", Icons.Default.Visibility, viewModel.tool == MapTool.REVEAL) {
-                    viewModel.tool = MapTool.REVEAL
+                BarItem {
+                    ToolChip("Reveal", Icons.Default.Visibility, viewModel.tool == MapTool.REVEAL) {
+                        viewModel.tool = MapTool.REVEAL
+                    }
                 }
-                ToolChip("Hide", Icons.Default.VisibilityOff, viewModel.tool == MapTool.HIDE) {
-                    viewModel.tool = MapTool.HIDE
+                BarItem {
+                    ToolChip("Hide", Icons.Default.VisibilityOff, viewModel.tool == MapTool.HIDE) {
+                        viewModel.tool = MapTool.HIDE
+                    }
                 }
-
-                IconButton(onClick = viewModel::undo, enabled = viewModel.canUndo) {
-                    Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
+                BarItem {
+                    IconButton(onClick = viewModel::undo, enabled = viewModel.canUndo) {
+                        Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
+                    }
                 }
-                IconButton(onClick = viewModel::redo, enabled = viewModel.canRedo) {
-                    Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
+                BarItem {
+                    IconButton(onClick = viewModel::redo, enabled = viewModel.canRedo) {
+                        Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
+                    }
                 }
-
-                OutlinedButton(onClick = viewModel::revealAll) { Text("Reveal all") }
-                OutlinedButton(onClick = viewModel::hideAll) { Text("Hide all") }
-
                 // Freezing lets the DM scout ahead without dragging the
                 // players' view along.
-                FilterChip(
-                    selected = viewModel.tvFrozen,
-                    onClick = viewModel::toggleFreezeTv,
-                    label = { Text(if (viewModel.tvFrozen) "TV frozen" else "TV follows") },
-                )
-                if (viewModel.tvFrozen) {
-                    OutlinedButton(onClick = viewModel::pushViewToTv) { Text("Push view") }
+                BarItem {
+                    FilterChip(
+                        selected = viewModel.tvFrozen,
+                        onClick = viewModel::toggleFreezeTv,
+                        label = { Text(if (viewModel.tvFrozen) "TV frozen" else "TV follows") },
+                    )
                 }
+                // Only meaningful while frozen, and kept next to the toggle it
+                // belongs to rather than stranded on the other row.
+                if (viewModel.tvFrozen) {
+                    BarItem {
+                        OutlinedButton(onClick = viewModel::pushViewToTv) { Text("Push view") }
+                    }
+                }
+                BarItem {
+                    FilterChip(
+                        selected = viewModel.blanked,
+                        onClick = viewModel::toggleBlank,
+                        label = { Text(if (viewModel.blanked) "TV hidden" else "Hide TV") },
+                    )
+                }
+            }
 
-                FilterChip(
-                    selected = viewModel.blanked,
-                    onClick = viewModel::toggleBlank,
-                    label = { Text(if (viewModel.blanked) "TV hidden" else "Hide TV") },
-                )
-
-                RotateControl(
-                    quarters = viewModel.rotationQuarters,
-                    onRotate = viewModel::rotateOutput,
-                )
+            // Row two: which way the table is facing, and the bulk fog actions.
+            ControlRow {
+                BarItem {
+                    IconButton(onClick = { viewModel.rotateOutput(-1) }) {
+                        Icon(Icons.Default.RotateLeft, contentDescription = "Rotate view anticlockwise")
+                    }
+                }
+                BarItem {
+                    Text(
+                        "${viewModel.rotationQuarters * 90}\u00B0",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+                BarItem {
+                    IconButton(onClick = { viewModel.rotateOutput(1) }) {
+                        Icon(Icons.Default.RotateRight, contentDescription = "Rotate view clockwise")
+                    }
+                }
+                BarItem { OutlinedButton(onClick = viewModel::revealAll) { Text("Reveal all") } }
+                BarItem { OutlinedButton(onClick = viewModel::hideAll) { Text("Hide all") } }
             }
 
             if (viewModel.tool != MapTool.PAN) {
@@ -354,24 +376,44 @@ private fun MapControlBar(viewModel: MapViewModel) {
 }
 
 /**
- * Turns the map and the player view together, in quarter steps.
+ * One centred line of the control bar.
  *
- * A TV lying flat on the table has no natural "up", so which way the map faces
- * depends on where people are sitting. The label shows the current angle
- * because after a couple of taps it stops being obvious.
+ * FlowRow rather than a plain Row so a narrow screen wraps instead of pushing
+ * controls off the edge -- the whole point of the portrait layout is that
+ * nothing hides behind a sideways scroll.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun RotateControl(quarters: Int, onRotate: (Int) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = { onRotate(-1) }) {
-            Icon(Icons.Default.RotateLeft, contentDescription = "Rotate view anticlockwise")
-        }
-        Text("${quarters * 90}\u00B0", style = MaterialTheme.typography.labelLarge)
-        IconButton(onClick = { onRotate(1) }) {
-            Icon(Icons.Default.RotateRight, contentDescription = "Rotate view clockwise")
-        }
+private fun ControlRow(content: @Composable () -> Unit) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        content()
     }
 }
+
+/**
+ * Gives every control the same height and centres it inside.
+ *
+ * Chips, icon buttons and outlined buttons are all different heights, so
+ * without this they sit on a common top edge and the row reads as ragged.
+ * Done with a wrapper rather than FlowRow's own item alignment so it does not
+ * depend on a parameter that only exists in newer Compose.
+ */
+@Composable
+private fun BarItem(content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier.height(BAR_ITEM_HEIGHT),
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
+    }
+}
+
+/** Tall enough for an IconButton's touch target, which is the largest control. */
+private val BAR_ITEM_HEIGHT = 48.dp
 
 /**
  * Brush size and edge softness. Stacked in portrait, where two sliders and
