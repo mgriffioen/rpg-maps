@@ -86,8 +86,13 @@ class MapViewModel(
     // --- tools ------------------------------------------------------------
 
     var tool by mutableStateOf(MapTool.PAN)
+
+    // Private setters so every change goes through updateBrush*, which also
+    // persists the value. A bare assignment would silently not be remembered.
     var brushRadiusMapPx by mutableStateOf(90f)
+        private set
     var brushSoftness by mutableStateOf(0.35f)
+        private set
 
     var canUndo by mutableStateOf(false)
         private set
@@ -259,7 +264,7 @@ class MapViewModel(
 
     fun pan(dxScreen: Float, dyScreen: Float) {
         val s = scale()
-        setView(view.copy(cx = view.cx - dxScreen / s, cy = view.cy - dyScreen / s))
+        applyView(view.copy(cx = view.cx - dxScreen / s, cy = view.cy - dyScreen / s))
     }
 
     /** Pinch zoom about a screen-space focal point, so the map stays put under the fingers. */
@@ -268,7 +273,7 @@ class MapViewModel(
         val (mx, my) = screenToMap(focusX, focusY)
         val newHalfH = clampHalfH(view.halfH / factor)
         val s = canvasH / (2f * newHalfH)
-        setView(
+        applyView(
             ViewState(
                 cx = mx - (focusX - canvasW / 2f) / s,
                 cy = my - (focusY - canvasH / 2f) / s,
@@ -277,7 +282,15 @@ class MapViewModel(
         )
     }
 
-    private fun setView(next: ViewState) {
+    /**
+     * The single place the viewport changes: clamps, stores, and mirrors to the
+     * TV unless it is frozen.
+     *
+     * Not called `setView` -- that is the JVM signature Kotlin already
+     * generates for the `view` property's (private) setter, and declaring both
+     * is a platform declaration clash.
+     */
+    private fun applyView(next: ViewState) {
         val entity = map.value ?: return
         view = ViewState(
             cx = next.cx.coerceIn(0f, entity.imageW.toFloat()),
@@ -295,7 +308,7 @@ class MapViewModel(
 
     fun fitToScreen() {
         val entity = map.value ?: return
-        setView(fitViewFor(entity, canvasW / canvasH))
+        applyView(fitViewFor(entity, canvasW / canvasH))
     }
 
     private fun fitViewFor(entity: MapEntity, aspect: Float): ViewState {
@@ -349,7 +362,7 @@ class MapViewModel(
 
         val wasFrozen = tvFrozen
         tvFrozen = false
-        setView(view.copy(halfH = clampHalfH(halfH)))
+        applyView(view.copy(halfH = clampHalfH(halfH)))
         tvFrozen = wasFrozen
         pushViewport(force = true)
 
@@ -534,12 +547,16 @@ class MapViewModel(
         }
     }
 
-    fun setBrushRadius(value: Float) {
+    // Named update* rather than set*: `setBrushSoftness(Float)` is the JVM
+    // signature Kotlin generates for the property itself, so declaring both
+    // would be a platform declaration clash.
+
+    fun updateBrushRadius(value: Float) {
         brushRadiusMapPx = value
         viewModelScope.launch { app.settings.setBrushRadiusMapPx(value) }
     }
 
-    fun setBrushSoftness(value: Float) {
+    fun updateBrushSoftness(value: Float) {
         brushSoftness = value
         viewModelScope.launch { app.settings.setBrushSoftness(value) }
     }

@@ -269,14 +269,14 @@ private fun MapControlBar(viewModel: MapViewModel) {
                     Text("Brush", style = MaterialTheme.typography.labelLarge)
                     Slider(
                         value = viewModel.brushRadiusMapPx,
-                        onValueChange = viewModel::setBrushRadius,
+                        onValueChange = viewModel::updateBrushRadius,
                         valueRange = 15f..400f,
                         modifier = Modifier.weight(1f),
                     )
                     Text("Edge", style = MaterialTheme.typography.labelLarge)
                     Slider(
                         value = viewModel.brushSoftness,
-                        onValueChange = viewModel::setBrushSoftness,
+                        onValueChange = viewModel::updateBrushSoftness,
                         valueRange = 0f..0.9f,
                         modifier = Modifier.weight(0.6f),
                     )
