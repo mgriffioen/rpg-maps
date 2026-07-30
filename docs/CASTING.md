@@ -36,6 +36,18 @@ works and Cast doesn't, the problem is in the Cast setup, not the app.
 > The address changes if your router hands the tablet a different IP. A DHCP
 > reservation in your router for the tablet makes it permanent.
 
+**The player view reconnects on its own.** It pings the tablet every few
+seconds and, if nothing answers for twelve, throws the connection away and
+dials again. That matters because the usual failure is not a clean
+disconnection but a *half-open* socket — the tablet drops off the Wi-Fi, and
+the laptop, having nothing to send, never finds out. Without the heartbeat the
+page looks perfectly connected while every reveal you paint goes nowhere, and
+the only cure is a manual reload.
+
+If you ever do see the map stop responding, the status line at the bottom of
+the idle screen says what the page thinks is happening. Give it fifteen seconds
+before reaching for the reload key.
+
 ---
 
 ## Route 2: Chromecast

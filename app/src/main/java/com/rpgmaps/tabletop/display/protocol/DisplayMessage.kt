@@ -164,6 +164,28 @@ data class ResyncRequest(
     val haveSeq: Long = -1,
 ) : DisplayMessage
 
+/**
+ * Application-level keepalive, receiver -> sender, answered with [Pong].
+ *
+ * WebSocket has its own ping frames, but a browser cannot send them -- it can
+ * only answer them. So a receiver has no way to notice a *half-open* socket:
+ * if the tablet drops off the Wi-Fi, the laptop's TCP stack has nothing to
+ * send and never learns the peer is gone. No error fires, `onclose` never
+ * runs, the page sits there looking connected, and every subsequent reveal is
+ * lost until someone reloads by hand.
+ *
+ * Sending these on a timer and watching for the answer is what turns that into
+ * an automatic reconnect.
+ */
+@Serializable
+@SerialName("ping")
+data object Ping : DisplayMessage
+
+/** Sender -> receiver, in reply to [Ping]. */
+@Serializable
+@SerialName("pong")
+data object Pong : DisplayMessage
+
 /** The shared JSON codec. The receiver's JavaScript reads the same `t` field. */
 val DisplayJson: Json = Json {
     classDiscriminator = "t"
@@ -173,3 +195,12 @@ val DisplayJson: Json = Json {
 
 /** Custom Cast namespace. Must match `NAMESPACE` in the web receiver. */
 const val CAST_NAMESPACE: String = "urn:x-cast:com.rpgmaps.tabletop"
+
+/**
+ * Pre-encoded keepalive frames. The transport compares and emits these as
+ * plain strings rather than round-tripping through the serializer, because
+ * they are sent on a short timer and never vary. Kept next to [Ping] and
+ * [Pong] so the two cannot drift apart.
+ */
+const val PING_JSON: String = """{"t":"ping"}"""
+const val PONG_JSON: String = """{"t":"pong"}"""

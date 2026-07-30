@@ -2,6 +2,8 @@ package com.rpgmaps.tabletop.display.lan
 
 import android.content.Context
 import android.util.Log
+import com.rpgmaps.tabletop.display.protocol.PING_JSON
+import com.rpgmaps.tabletop.display.protocol.PONG_JSON
 import fi.iki.elonen.NanoHTTPD.IHTTPSession
 import fi.iki.elonen.NanoHTTPD.Response
 import fi.iki.elonen.NanoHTTPD.newFixedLengthResponse
@@ -56,7 +58,7 @@ class LanServer(
     fun broadcast(json: String) {
         for (client in clients) {
             try {
-                client.send(json)
+                client.sendJson(json)
             } catch (e: IOException) {
                 Log.d(TAG, "dropping dead client", e)
                 clients.remove(client)
@@ -69,7 +71,7 @@ class LanServer(
     fun pingAll() {
         for (client in clients) {
             try {
-                client.ping(PING_PAYLOAD)
+                client.sendPing()
             } catch (e: IOException) {
                 clients.remove(client)
                 onClientCountChanged(clients.size)
@@ -130,6 +132,19 @@ class LanServer(
 
     inner class StateSocket(handshake: IHTTPSession) : WebSocket(handshake) {
 
+        /**
+         * NanoWSD's send is not thread-safe, and this socket is written to from
+         * several places at once: fog strokes from the main thread, the
+         * viewport pump and full-state pushes from background coroutines, and
+         * the keepalive from its own job. Without this lock those frames
+         * interleave on the wire and the browser drops the connection.
+         */
+        private val writeLock = Any()
+
+        fun sendJson(json: String) = synchronized(writeLock) { send(json) }
+
+        fun sendPing() = synchronized(writeLock) { ping(PING_PAYLOAD) }
+
         override fun onOpen() {
             clients.add(this)
             onClientCountChanged(clients.size)
@@ -141,7 +156,18 @@ class LanServer(
         }
 
         override fun onMessage(message: WebSocketFrame) {
-            onClientMessage(message.textPayload)
+            val payload = message.textPayload
+            // Keepalive is a transport concern, so it is answered here rather
+            // than travelling up to the sink and back.
+            if (payload == PING_JSON) {
+                try {
+                    sendJson(PONG_JSON)
+                } catch (e: IOException) {
+                    Log.d(TAG, "pong failed", e)
+                }
+                return
+            }
+            onClientMessage(payload)
         }
 
         override fun onPong(pong: WebSocketFrame) = Unit

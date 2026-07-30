@@ -296,14 +296,17 @@ function argbToCss(argb) {
   return '#' + s;
 }
 
-function render() {
-  requestAnimationFrame(render);
+var lastDrawAt = 0;
+
+function draw() {
+  lastDrawAt = Date.now();
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, stage.width, stage.height);
 
   if (!state.image || !state.map || !state.view) return;
+
 
   // Ease towards the requested viewport. The DM's pan arrives at 25 Hz; this
   // turns those steps into a continuous glide without adding real latency.
@@ -340,6 +343,26 @@ function render() {
     ctx.drawImage(state.fog, 0, 0, state.map.imageW, state.map.imageH);
   }
 }
+
+function frameLoop() {
+  requestAnimationFrame(frameLoop);
+  draw();
+}
+
+/*
+ * Safari throttles requestAnimationFrame heavily when its window is not the
+ * focused one -- and this page is normally full-screen on a TV while the DM is
+ * looking at the tablet. Left to rAF alone the map can simply stop updating
+ * until someone clicks the window.
+ *
+ * This watchdog redraws on a plain timer whenever rAF has stalled. Timers get
+ * throttled too, but only to about 1 Hz, which keeps reveals appearing instead
+ * of freezing. It deliberately does not re-arm rAF: that chain is still
+ * pending, just slow.
+ */
+setInterval(function () {
+  if (Date.now() - lastDrawAt > 700) draw();
+}, 500);
 
 function drawGrid(scale) {
   var g = state.grid;
@@ -421,36 +444,150 @@ function startCastTransport() {
 
 function startSocketTransport() {
   transport.label = 'Local network';
+
   var socket = null;
+  var retryTimer = null;
   var retryMs = 500;
+  var lastInboundAt = 0;
+  var heartbeat = null;
+
+  /*
+   * A browser can answer WebSocket ping frames but cannot send them, so it has
+   * no way to notice a *half-open* socket on its own: if the tablet drops off
+   * the Wi-Fi, this machine has nothing to send, never learns the peer is
+   * gone, and `onclose` never fires. The page keeps looking connected while
+   * every subsequent reveal is silently lost -- only a manual reload fixes it.
+   *
+   * So: send an application-level ping on a timer, and if nothing at all comes
+   * back for HEARTBEAT_TIMEOUT_MS, throw the socket away and dial again.
+   */
+  var HEARTBEAT_INTERVAL_MS = 4000;
+  var HEARTBEAT_TIMEOUT_MS = 12000;
+
+  /*
+   * Every socket carries the generation it was opened in. A socket that has
+   * been given up on gets its handlers ignored, so a late close or error from
+   * a corpse cannot disturb the connection that replaced it.
+   */
+  var generation = 0;
+
+  function stopHeartbeat() {
+    if (heartbeat !== null) { clearInterval(heartbeat); heartbeat = null; }
+  }
+
+  /*
+   * Abandons the current socket without waiting on it.
+   *
+   * close() alone is not enough on a half-open connection: it starts a closing
+   * handshake that the vanished peer will never answer, so readyState sits at
+   * CLOSING and onclose may never fire. Bumping the generation is what makes
+   * the abandonment immediate.
+   */
+  function discardSocket() {
+    stopHeartbeat();
+    generation++;
+    if (socket) {
+      socket.onopen = socket.onmessage = socket.onclose = socket.onerror = null;
+      try { socket.close(); } catch (e) {}
+      socket = null;
+    }
+  }
+
+  function scheduleReconnect(delayMs) {
+    if (retryTimer !== null) return;
+    retryTimer = setTimeout(function () {
+      retryTimer = null;
+      connect();
+    }, delayMs);
+  }
+
+  function startHeartbeat() {
+    stopHeartbeat();
+    lastInboundAt = Date.now();
+    heartbeat = setInterval(function () {
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+
+      if (Date.now() - lastInboundAt > HEARTBEAT_TIMEOUT_MS) {
+        setStatus('connection lost, reconnecting\u2026', false);
+        idleEl.classList.remove('hidden');
+        discardSocket();
+        scheduleReconnect(250);
+        return;
+      }
+      try { socket.send('{"t":"ping"}'); } catch (e) { /* the close path handles it */ }
+    }, HEARTBEAT_INTERVAL_MS);
+  }
 
   function connect() {
+    var myGeneration = generation;
     var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
-    socket = new WebSocket(proto + location.host + '/ws');
+    var ws;
+    try {
+      ws = new WebSocket(proto + location.host + '/ws');
+    } catch (e) {
+      scheduleReconnect(retryMs);
+      retryMs = Math.min(retryMs * 2, 5000);
+      return;
+    }
+    socket = ws;
 
-    socket.onopen = function () {
+    ws.onopen = function () {
+      if (myGeneration !== generation) return;
       retryMs = 500;
       setStatus('connected to the tablet', true);
       transport.announce();
       // Ask for everything: this may be a reconnect after a Wi-Fi blip.
       transport.send({t: 'resync', haveSeq: state.fogSeq});
+      startHeartbeat();
     };
-    socket.onmessage = function (event) {
-      try { handle(JSON.parse(event.data)); } catch (e) { /* ignore junk */ }
+
+    ws.onmessage = function (event) {
+      if (myGeneration !== generation) return;
+      lastInboundAt = Date.now();
+      var msg;
+      try { msg = JSON.parse(event.data); } catch (e) { return; }
+      // A pong carries no state; receiving it at all is the whole point.
+      if (msg && msg.t === 'pong') return;
+      handle(msg);
     };
-    socket.onclose = function () {
-      setStatus('reconnecting…', false);
+
+    ws.onclose = function () {
+      if (myGeneration !== generation) return;
+      stopHeartbeat();
+      socket = null;
+      setStatus('reconnecting\u2026', false);
       idleEl.classList.remove('hidden');
-      // Back off, but stay responsive enough to recover during a session.
-      setTimeout(connect, retryMs);
+      // Back off, but stay responsive enough to recover mid-session.
+      scheduleReconnect(retryMs);
       retryMs = Math.min(retryMs * 2, 5000);
     };
-    socket.onerror = function () { try { socket.close(); } catch (e) {} };
+
+    ws.onerror = function () {
+      if (myGeneration !== generation) return;
+      try { ws.close(); } catch (e) {}
+    };
   }
 
   transport.send = function (obj) {
     if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(obj));
   };
+
+  /*
+   * A laptop waking from sleep is the other way to end up stale. Rather than
+   * trust the socket, ask for a resync and let the heartbeat time out quickly
+   * if the answer never arrives.
+   */
+  function recheck() {
+    if (!socket) { scheduleReconnect(0); return; }
+    if (socket.readyState === WebSocket.OPEN) {
+      transport.send({t: 'resync', haveSeq: state.fogSeq});
+    }
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) recheck();
+  });
+  window.addEventListener('online', recheck);
+  window.addEventListener('focus', recheck);
 
   connect();
 }
@@ -458,7 +595,7 @@ function startSocketTransport() {
 /* ----------------------------- boot ------------------------------- */
 
 resize();
-requestAnimationFrame(render);
+requestAnimationFrame(frameLoop);
 
 // A Chromecast always identifies itself with "CrKey". `?mode=cast` is an
 // escape hatch for testing the Cast path in a desktop browser.

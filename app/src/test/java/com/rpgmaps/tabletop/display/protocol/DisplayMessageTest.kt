@@ -56,6 +56,20 @@ class DisplayMessageTest {
         assertEquals(ReceiverHello(3840, 2160, "TV"), decoded)
     }
 
+    /**
+     * The receiver sends the ping as a hardcoded string and the transport
+     * compares against the constant, so neither may drift from the serialized
+     * form. If this fails, keepalive silently stops working and a half-open
+     * socket goes back to being invisible.
+     */
+    @Test
+    fun `keepalive constants match what the serializer produces`() {
+        assertEquals(PING_JSON, encode(Ping))
+        assertEquals(PONG_JSON, encode(Pong))
+        assertEquals(Ping, decode(PING_JSON))
+        assertEquals(Pong, decode(PONG_JSON))
+    }
+
     @Test
     fun `cast namespace matches the receiver`() {
         // receiver/index.html hardcodes this string; they must not drift.
