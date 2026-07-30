@@ -8,7 +8,9 @@ import com.rpgmaps.tabletop.display.protocol.DisplayJson
 import com.rpgmaps.tabletop.display.protocol.DisplayMessage
 import com.rpgmaps.tabletop.display.protocol.ImageUrl
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,6 +46,22 @@ class LanSink(
 
     private var server: LanServer? = null
     private var pingJob: Job? = null
+    private var writerJob: Job? = null
+
+    /**
+     * Outbound queue, drained by exactly one coroutine on [Dispatchers.IO].
+     *
+     * Two things make this mandatory rather than tidy. Writing to a socket
+     * blocks, and [send] is called from the main thread every time the DM
+     * paints -- Android answers that with NetworkOnMainThreadException, which
+     * the hub catches and logs, so fog updates fail silently while the
+     * connection looks perfectly healthy. And a single consumer is what keeps
+     * brush strokes in the order they were drawn.
+     *
+     * Unbounded because dropping a message would desync the mask with no way
+     * to notice; the entries are small and the writer keeps up easily on a LAN.
+     */
+    private val outbound = Channel<String>(Channel.UNLIMITED)
 
     /** `http://192.168.1.20:8770`, or null while stopped. Shown to the DM. */
     var url: String? = null
@@ -71,6 +89,7 @@ class LanSink(
                     connected = false,
                     detail = url ?: "Not on a network",
                 )
+                startWriter()
                 startPinging()
                 return
             } catch (e: IOException) {
@@ -90,15 +109,36 @@ class LanSink(
     override fun stop() {
         pingJob?.cancel()
         pingJob = null
+        writerJob?.cancel()
+        writerJob = null
         runCatching { server?.stop() }
         server = null
         url = null
         _status.value = SinkStatus(label = "Local network", detail = "Stopped")
     }
 
+    /** Encodes on the calling thread, but never touches the socket here. */
     override fun send(message: DisplayMessage) {
-        val server = server ?: return
-        server.broadcast(DisplayJson.encodeToString(DisplayMessage.serializer(), message))
+        if (server == null) return
+        outbound.trySend(DisplayJson.encodeToString(DisplayMessage.serializer(), message))
+    }
+
+    private fun startWriter() {
+        writerJob?.cancel()
+        writerJob = scope.launch(Dispatchers.IO) {
+            // Anything queued while stopped is stale; a fresh client is sent
+            // the full state on connect regardless.
+            while (outbound.tryReceive().isSuccess) Unit
+
+            for (json in outbound) {
+                val current = server ?: continue
+                try {
+                    current.broadcast(json)
+                } catch (e: Exception) {
+                    Log.w(TAG, "broadcast failed", e)
+                }
+            }
+        }
     }
 
     override fun presentImage(revision: Int, bytes: ByteArray, mime: String) {

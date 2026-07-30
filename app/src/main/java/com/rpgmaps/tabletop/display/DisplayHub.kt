@@ -220,12 +220,21 @@ class DisplayHub(private val scope: CoroutineScope) {
 
     // --- plumbing ---------------------------------------------------------
 
+    /**
+     * A sink that throws must not take the others down with it, but a throw
+     * here is always a bug rather than a routine network hiccup -- sinks queue
+     * their I/O and are documented not to block. This once swallowed every fog
+     * update on the local network: `send` wrote to the socket synchronously,
+     * the DM's brush strokes arrive on the main thread, and Android answers
+     * that with NetworkOnMainThreadException. Logged loudly so the next one
+     * does not hide for as long.
+     */
     private fun broadcast(message: DisplayMessage) {
         _sinks.value.forEach { sink ->
             try {
                 sink.send(message)
             } catch (e: Exception) {
-                Log.w(TAG, "sink ${sink.id} rejected ${message::class.simpleName}", e)
+                Log.e(TAG, "sink ${sink.id} threw on ${message::class.simpleName}", e)
             }
         }
     }

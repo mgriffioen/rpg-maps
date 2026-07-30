@@ -18,6 +18,7 @@ import com.rpgmaps.tabletop.display.protocol.ReceiverHello
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -65,6 +66,10 @@ class CastSink(
     private var castContext: CastContext? = null
     private var session: CastSession? = null
     private var transferJob: Job? = null
+    private var writerJob: Job? = null
+
+    /** Ordered outbound queue; see [send]. */
+    private val outbound = Channel<String>(Channel.UNLIMITED)
 
     /** Re-sent automatically when a dropped session comes back. */
     private var lastImage: Triple<Int, ByteArray, String>? = null
@@ -141,10 +146,25 @@ class CastSink(
         }
     }
 
+    /**
+     * Queued rather than launched per message. Independent coroutines reach
+     * the Cast framework in whatever order the dispatcher feels like, and fog
+     * strokes applied out of order leave the receiver's mask quietly wrong.
+     */
     override fun send(message: DisplayMessage) {
-        val session = session ?: return
-        val json = DisplayJson.encodeToString(DisplayMessage.serializer(), message)
-        scope.launch { sendRaw(session, json) }
+        if (session == null) return
+        outbound.trySend(DisplayJson.encodeToString(DisplayMessage.serializer(), message))
+    }
+
+    private fun startWriter() {
+        writerJob?.cancel()
+        writerJob = scope.launch {
+            while (outbound.tryReceive().isSuccess) Unit
+            for (json in outbound) {
+                val current = session ?: continue
+                sendRaw(current, json)
+            }
+        }
     }
 
     override fun presentImage(revision: Int, bytes: ByteArray, mime: String) {
@@ -167,6 +187,7 @@ class CastSink(
             return
         }
 
+        startWriter()
         _status.value = _status.value.copy(
             connected = true,
             detail = newSession.castDevice?.friendlyName ?: detail,
@@ -179,6 +200,8 @@ class CastSink(
     private fun unbind(detail: String) {
         transferJob?.cancel()
         transferJob = null
+        writerJob?.cancel()
+        writerJob = null
         runCatching { session?.removeMessageReceivedCallbacks(CAST_NAMESPACE) }
         session = null
         _status.value = _status.value.copy(connected = false, detail = detail, transferProgress = null)

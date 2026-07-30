@@ -93,13 +93,30 @@ expressed as an op, so those send the whole mask instead.
 
 ## Threading
 
-Fog snapshots (`toPng`) run on the **main thread** on purpose, even though they
-take tens of milliseconds. The mask is mutated from the main thread while
-painting, so encoding it anywhere else risks a torn snapshot mid-stroke. A
-one-off frame hitch when a receiver connects is the better trade.
+**A `DisplaySink.send` must never block, and must never touch the network on
+the calling thread.** Both sinks therefore encode on the caller's thread and
+hand the string to an unbounded channel drained by a single coroutine.
 
-The file write that follows *is* on IO, and is debounced ~1.2 s so a burst of
-brush strokes doesn't hammer flash.
+This is not a stylistic preference, it is the fix for a bug that cost a full
+debugging session. `LanSink.send` used to write to the socket synchronously.
+Every fog stroke, grid toggle and curtain originates in `viewModelScope`, which
+is `Dispatchers.Main`, and Android answers a blocking socket write there with
+`NetworkOnMainThreadException` — which `DisplayHub.broadcast` caught and logged
+at warning level. The result was a player view that connected perfectly, showed
+the right map, tracked pan and zoom, and silently ignored every reveal. The two
+things that worked were the two that never ran on the main thread: the viewport
+pump and full-state pushes, both on the hub's own scope.
+
+The single consumer matters too. Independent `launch` calls reach a socket in
+whatever order the dispatcher picks, and fog ops applied out of order leave the
+receiver's mask quietly wrong.
+
+Fog snapshots (`toPng`) do run on the **main thread** on purpose, even though
+they take tens of milliseconds. That is CPU work, not I/O. The mask is mutated
+from the main thread while painting, so encoding it anywhere else risks a torn
+snapshot mid-stroke; a one-off frame hitch when a receiver connects is the
+better trade. The file write that follows *is* on IO, debounced ~1.2 s so a
+burst of strokes doesn't hammer flash.
 
 ## What is deliberately not here
 
