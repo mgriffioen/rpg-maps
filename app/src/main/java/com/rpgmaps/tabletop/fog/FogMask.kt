@@ -9,7 +9,12 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
+import android.graphics.RectF
 import com.rpgmaps.tabletop.display.protocol.FogOp
+import com.rpgmaps.tabletop.display.protocol.FogShape
+import com.rpgmaps.tabletop.display.protocol.MAX_SHAPE_BLUR_PX
+import com.rpgmaps.tabletop.display.protocol.MIN_BLUR_PX
+import com.rpgmaps.tabletop.display.protocol.SHAPE_SOFTNESS_FACTOR
 import java.io.ByteArrayOutputStream
 import kotlin.math.roundToInt
 
@@ -33,23 +38,22 @@ class FogMask private constructor(val bitmap: Bitmap) {
     val width: Int get() = bitmap.width
     val height: Int get() = bitmap.height
 
-    /** Applies one brush stroke in place. Coordinates are mask pixels. */
+    /** Applies one fog op in place. Coordinates are mask pixels. */
     fun apply(op: FogOp) {
+        when (op.shape) {
+            FogShape.BRUSH -> applyBrush(op)
+            FogShape.RECT, FogShape.OVAL -> applyShape(op)
+        }
+    }
+
+    private fun applyBrush(op: FogOp) {
         if (op.pts.size < 2) return
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        val paint = basePaint(op).apply {
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
             strokeWidth = op.radius * 2f
-            color = Color.BLACK
-            if (op.softness > 0f) {
-                // Blur is only legal on a software canvas, which is what a
-                // Canvas wrapping a Bitmap always is.
-                val blur = (op.radius * op.softness).coerceAtLeast(0.6f)
-                maskFilter = BlurMaskFilter(blur, BlurMaskFilter.Blur.NORMAL)
-            }
-            // Revealing punches a hole; hiding paints black the normal way.
-            if (op.reveal) xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+            blur(op.radius * op.softness)
         }
 
         if (op.pts.size == 2) {
@@ -66,6 +70,46 @@ class FogMask private constructor(val bitmap: Bitmap) {
             }
         }
         canvas.drawPath(path, paint)
+    }
+
+    /**
+     * A filled rectangle or ellipse from two opposite corners.
+     *
+     * The blur is a fraction of the shorter side rather than of a brush
+     * radius, capped so that a very soft edge on a large room does not wash
+     * the whole thing out. `applyFogOp` in the receiver does the same sum.
+     */
+    private fun applyShape(op: FogOp) {
+        if (op.pts.size < 4) return
+        val left = minOf(op.pts[0], op.pts[2])
+        val top = minOf(op.pts[1], op.pts[3])
+        val right = maxOf(op.pts[0], op.pts[2])
+        val bottom = maxOf(op.pts[1], op.pts[3])
+        if (right - left < 1f || bottom - top < 1f) return
+
+        val shorterSide = minOf(right - left, bottom - top)
+        val paint = basePaint(op).apply {
+            style = Paint.Style.FILL
+            blur((shorterSide * op.softness * SHAPE_SOFTNESS_FACTOR).coerceAtMost(MAX_SHAPE_BLUR_PX))
+        }
+
+        val rect = RectF(left, top, right, bottom)
+        if (op.shape == FogShape.OVAL) canvas.drawOval(rect, paint) else canvas.drawRect(rect, paint)
+    }
+
+    private fun basePaint(op: FogOp) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.BLACK
+        // Revealing punches a hole; hiding paints black the normal way.
+        if (op.reveal) xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+    }
+
+    /**
+     * Blur is only legal on a software canvas, which is what a Canvas wrapping
+     * a Bitmap always is. A zero request means a hard edge.
+     */
+    private fun Paint.blur(radius: Float) {
+        if (radius <= 0f) return
+        maskFilter = BlurMaskFilter(radius.coerceAtLeast(MIN_BLUR_PX), BlurMaskFilter.Blur.NORMAL)
     }
 
     /** Hides or reveals the entire map at once. */

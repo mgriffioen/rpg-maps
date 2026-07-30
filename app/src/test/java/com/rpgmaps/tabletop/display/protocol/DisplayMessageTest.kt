@@ -31,6 +31,10 @@ class DisplayMessageTest {
             ImageChunk(3, 0, 12, "image/jpeg", "AAAA"),
             ViewportMessage(1f, 2f, 3f),
             FogOpsMessage(7, listOf(FogOp(true, 12f, 0.3f, listOf(1f, 2f, 3f, 4f)))),
+            FogOpsMessage(
+                8,
+                listOf(FogOp(false, 0f, 0.4f, listOf(5f, 6f, 7f, 8f), FogShape.OVAL)),
+            ),
             FogResetMessage(8, "iVBORw0KGgo="),
             FogFillMessage(9, fogged = true),
             GridMessage(true, 64f, 3f, 5f),
@@ -80,6 +84,27 @@ class DisplayMessageTest {
     fun `rotation is sent as quarter turns under the rot tag`() {
         val json = encode(RotationMessage(1))
         assertEquals("""{"t":"rot","quarters":1}""", json)
+    }
+
+    /**
+     * The receiver reads `op.shape` as a lowercase string and defaults a
+     * missing one to a brush stroke. Both halves of that matter: the names
+     * must not become Kotlin's SCREAMING_CASE, and an op sent without the
+     * field must still paint freehand.
+     */
+    @Test
+    fun `fog shapes serialise as lowercase names and default to brush`() {
+        val oval = encode(FogOpsMessage(1, listOf(FogOp(true, 0f, 0f, listOf(1f, 2f, 3f, 4f), FogShape.OVAL))))
+        assertTrue("expected a lowercase shape in ${'$'}oval", oval.contains("\"shape\":\"oval\""))
+
+        val rect = encode(FogOpsMessage(1, listOf(FogOp(true, 0f, 0f, listOf(1f, 2f, 3f, 4f), FogShape.RECT))))
+        assertTrue("expected a lowercase shape in ${'$'}rect", rect.contains("\"shape\":\"rect\""))
+
+        val withoutShape = DisplayJson.decodeFromString(
+            DisplayMessage.serializer(),
+            """{"t":"fog","seq":1,"ops":[{"reveal":true,"radius":9.0,"softness":0.0,"pts":[1.0,2.0]}]}""",
+        ) as FogOpsMessage
+        assertEquals(FogShape.BRUSH, withoutShape.ops.first().shape)
     }
 
     @Test

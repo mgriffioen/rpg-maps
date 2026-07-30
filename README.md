@@ -15,9 +15,10 @@ middle of the table as the battle map.
   or Downloads. They are copied onto the device, so a session needs no internet.
 - **Pan and zoom.** One finger to drag, two to pinch. Works the same whether
   you're framing a whole dungeon level or one corner of a room.
-- **Fog of war.** Paint with your finger or a stylus to reveal. Adjustable brush
-  size and edge softness, paint fog back on, undo/redo, reveal all, hide all.
-  Fog is saved per map and survives closing the app.
+- **Fog of war.** Paint with your finger or a stylus to reveal, or drag out a
+  rectangle or oval for a room in one go. Adjustable brush size and edge
+  softness, paint fog back on, undo/redo, reveal all, hide all. Fog is saved
+  per map and survives closing the app.
 - **Freeze the TV.** Scout three rooms ahead without dragging the players' view
   with you. A gold outline on your screen shows exactly what they can see.
 - **Scale to life.** Tell the app how big a battle square is and how big the TV

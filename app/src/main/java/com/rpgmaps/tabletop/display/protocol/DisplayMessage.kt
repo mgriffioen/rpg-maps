@@ -88,14 +88,50 @@ data class ViewportMessage(
     val halfH: Float,
 ) : DisplayMessage
 
-/** A single brush stroke. [pts] is a flat `x0, y0, x1, y1, ...` run in fog pixels. */
+/** How a fog op paints. Serialises to the lowercase name the receiver reads. */
+@Serializable
+enum class FogShape {
+    @SerialName("brush") BRUSH,
+    @SerialName("rect") RECT,
+    @SerialName("oval") OVAL,
+}
+
+/**
+ * One fog edit, in fog-mask pixels.
+ *
+ * [pts] means different things per [shape], which keeps one op type -- and so
+ * one ordering, sequencing and undo path -- for both freehand and shapes:
+ *
+ *  - [FogShape.BRUSH]: a flat `x0, y0, x1, y1, ...` polyline stroked with
+ *    round caps at [radius].
+ *  - [FogShape.RECT] and [FogShape.OVAL]: exactly four values, two opposite
+ *    corners of the bounding box. [radius] is unused.
+ *
+ * Edge softness is a blur. For a brush it is `radius * softness`; a shape has
+ * no radius, so it is a fraction of the shorter side -- see
+ * [SHAPE_SOFTNESS_FACTOR]. Both renderers must use the same formula or the
+ * tablet and the TV disagree about where the fog ends.
+ */
 @Serializable
 data class FogOp(
     val reveal: Boolean,
     val radius: Float,
     val softness: Float,
     val pts: List<Float>,
+    val shape: FogShape = FogShape.BRUSH,
 )
+
+/**
+ * Blur radius for a shape edge, as a fraction of its shorter side times the
+ * softness slider. Mirrored in `applyFogOp` in receiver/index.html.
+ */
+const val SHAPE_SOFTNESS_FACTOR: Float = 0.15f
+
+/** Shared by both renderers so a soft edge never collapses to a hard one. */
+const val MIN_BLUR_PX: Float = 0.6f
+
+/** Keeps a very soft edge on a very large shape from washing the whole thing out. */
+const val MAX_SHAPE_BLUR_PX: Float = 60f
 
 /**
  * Incremental fog changes. [seq] is the mask revision *after* these ops are

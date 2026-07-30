@@ -107,6 +107,17 @@ Undo is a stack of PNG snapshots. That sounds expensive until you notice the
 mask is two-tone — black and transparent — so a 1536 px PNG of it is tens of
 kilobytes. Thirty levels of history costs a couple of megabytes.
 
+Rectangles and ovals are the same `FogOp`, not a new message: `shape` says how
+to read `pts` -- a polyline for a brush, two opposite corners for a shape. One
+op type means one ordering, sequencing and undo path for both. Shapes have no
+incremental phase, so they skip the stroke buffer and commit through
+`FogEditor.applyOnce` as a single undo step.
+
+Softness is a blur in both cases, but from different bases: `radius * softness`
+for a brush, and a capped fraction of the shorter side for a shape, which has
+no radius. `SHAPE_SOFTNESS_FACTOR` and its neighbours live in the protocol file
+precisely because `applyFogOp` in the receiver has to compute the same number.
+
 Strokes are **batched, not sent per touch event**. `FogEditor` buffers points
 and flushes every 40 ms; the flush produces one `FogOp` that is both drawn
 locally and sent over the wire. Applying the identical op on both sides is what

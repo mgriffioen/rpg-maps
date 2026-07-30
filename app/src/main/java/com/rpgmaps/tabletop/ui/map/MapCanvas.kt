@@ -25,6 +25,7 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
+import com.rpgmaps.tabletop.display.protocol.FogShape
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 
@@ -57,7 +58,7 @@ fun MapCanvas(
         modifier = modifier
             .background(Color(0xFF05070C))
             .onSizeChanged { viewModel.onCanvasSized(it.width.toFloat(), it.height.toFloat()) }
-            .pointerInput(viewModel.tool) { handleMapGestures(viewModel) },
+            .pointerInput(viewModel.tool, viewModel.fogShape) { handleMapGestures(viewModel) },
     ) {
         Canvas(Modifier.fillMaxSize()) {
             // Read so Compose repaints when the mask is drawn into. The bitmap
@@ -128,6 +129,14 @@ fun MapCanvas(
                     drawTvOutline(tv, tvAspect, 2.5f / scale, viewModel.tvFrozen)
                 }
 
+                drawShapePreview(
+                    start = viewModel.shapeStart,
+                    end = viewModel.shapeEnd,
+                    oval = viewModel.fogShape == FogShape.OVAL,
+                    reveal = viewModel.tool == MapTool.REVEAL,
+                    strokeWidth = 2.5f / scale,
+                )
+
                 if (viewModel.calibrating) {
                     drawMeasureLine(
                         start = viewModel.measureStart,
@@ -183,6 +192,36 @@ private fun DrawScope.drawTvOutline(
     )
 }
 
+/**
+ * Outlines the rectangle or ellipse currently being dragged out, in the colour
+ * of what it is about to do -- warm for revealing, cold for hiding back.
+ */
+private fun DrawScope.drawShapePreview(
+    start: Pair<Float, Float>?,
+    end: Pair<Float, Float>?,
+    oval: Boolean,
+    reveal: Boolean,
+    strokeWidth: Float,
+) {
+    if (start == null || end == null) return
+    val left = minOf(start.first, end.first)
+    val top = minOf(start.second, end.second)
+    val width = kotlin.math.abs(end.first - start.first)
+    val height = kotlin.math.abs(end.second - start.second)
+    if (width < 1f || height < 1f) return
+
+    val color = if (reveal) Color(0xFFFFD479) else Color(0xFF9EC5FF)
+    val topLeft = Offset(left, top)
+    val size = Size(width, height)
+    if (oval) {
+        drawOval(color = color, topLeft = topLeft, size = size, style = Stroke(strokeWidth))
+        drawOval(color = color, topLeft = topLeft, size = size, alpha = 0.18f)
+    } else {
+        drawRect(color = color, topLeft = topLeft, size = size, style = Stroke(strokeWidth))
+        drawRect(color = color, topLeft = topLeft, size = size, alpha = 0.18f)
+    }
+}
+
 /** The calibration ruler the DM drags across a known square. */
 private fun DrawScope.drawMeasureLine(
     start: Pair<Float, Float>?,
@@ -214,11 +253,16 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.handleMa
         val down = awaitFirstDown(requireUnconsumed = false)
         var painting = false
         var measuring = false
+        var shaping = false
         var usedMultiTouch = false
 
         if (viewModel.calibrating) {
             measuring = true
             viewModel.beginMeasure(down.position.x, down.position.y)
+            down.consume()
+        } else if (viewModel.tool != MapTool.PAN && viewModel.fogShape != FogShape.BRUSH) {
+            shaping = true
+            viewModel.beginShape(down.position.x, down.position.y)
             down.consume()
         } else if (viewModel.tool != MapTool.PAN) {
             painting = true
@@ -236,6 +280,12 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.handleMa
                 if (painting) {
                     viewModel.endStroke()
                     painting = false
+                }
+                // A second finger means the DM wants to reframe, not to
+                // commit the half-drawn shape.
+                if (shaping) {
+                    viewModel.cancelShape()
+                    shaping = false
                 }
                 measuring = false
                 usedMultiTouch = true
@@ -255,6 +305,10 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.handleMa
                         viewModel.updateMeasure(change.position.x, change.position.y)
                         change.consume()
                     }
+                    shaping -> {
+                        viewModel.updateShape(change.position.x, change.position.y)
+                        change.consume()
+                    }
                     painting -> {
                         viewModel.extendStroke(change.position.x, change.position.y)
                         change.consume()
@@ -272,6 +326,7 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.handleMa
         }
 
         if (painting) viewModel.endStroke()
+        if (shaping) viewModel.endShape()
     }
 }
 

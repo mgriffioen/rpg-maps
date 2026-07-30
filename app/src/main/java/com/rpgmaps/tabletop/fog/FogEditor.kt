@@ -106,6 +106,18 @@ class FogEditor(val mask: FogMask) {
         return op
     }
 
+    /**
+     * Applies a single completed op -- a rectangle or an ellipse -- as one
+     * undo step. Shapes have no incremental phase, so they do not go through
+     * the stroke buffer at all.
+     */
+    fun applyOnce(op: FogOp): Long {
+        pushUndoSnapshot()
+        mask.apply(op)
+        revision++
+        return revision
+    }
+
     // --- Bulk operations ------------------------------------------------
 
     /** Hides or reveals everything. Undoable. */

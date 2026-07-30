@@ -14,6 +14,8 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.rpgmaps.tabletop.RpgMapsApplication
 import com.rpgmaps.tabletop.data.db.MapEntity
 import com.rpgmaps.tabletop.display.protocol.BlankMessage
+import com.rpgmaps.tabletop.display.protocol.FogOp
+import com.rpgmaps.tabletop.display.protocol.FogShape
 import com.rpgmaps.tabletop.display.protocol.GridMessage
 import com.rpgmaps.tabletop.display.protocol.MapAnnounced
 import com.rpgmaps.tabletop.display.protocol.RotationMessage
@@ -33,6 +35,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 import kotlin.math.hypot
 
 /** What a one-finger drag on the map does. Two fingers always pan and zoom. */
@@ -96,6 +99,24 @@ class MapViewModel(
     var brushRadiusMapPx by mutableStateOf(90f)
         private set
     var brushSoftness by mutableStateOf(0.35f)
+        private set
+
+    /**
+     * What a drag paints with: freehand, or a dragged-out rectangle/ellipse.
+     * Independent of [tool] -- each shape can either reveal or hide.
+     */
+    var fogShape by mutableStateOf(FogShape.BRUSH)
+        private set
+
+    fun setFogShape(shape: FogShape) {
+        if (shapeStart != null) cancelShape()
+        fogShape = shape
+    }
+
+    /** Corners of the shape being dragged out, in map pixels. Null when idle. */
+    var shapeStart by mutableStateOf<Pair<Float, Float>?>(null)
+        private set
+    var shapeEnd by mutableStateOf<Pair<Float, Float>?>(null)
         private set
 
     var canUndo by mutableStateOf(false)
@@ -512,6 +533,57 @@ class MapViewModel(
         val (mx, my) = screenToMap(screenX, screenY)
         return (mx * entity.fogW / entity.imageW) to (my * entity.fogH / entity.imageH)
     }
+
+    // --- shapes -----------------------------------------------------------
+
+    fun beginShape(screenX: Float, screenY: Float) {
+        if (tool == MapTool.PAN || fogShape == FogShape.BRUSH) return
+        shapeStart = screenToMap(screenX, screenY)
+        shapeEnd = shapeStart
+    }
+
+    fun updateShape(screenX: Float, screenY: Float) {
+        if (shapeStart == null) return
+        shapeEnd = screenToMap(screenX, screenY)
+    }
+
+    /** Abandons the in-progress shape, e.g. when a second finger starts a pinch. */
+    fun cancelShape() {
+        shapeStart = null
+        shapeEnd = null
+    }
+
+    /** Commits the dragged shape as one undoable op and mirrors it to the TV. */
+    fun endShape() {
+        val entity = map.value
+        val currentEditor = editor
+        val start = shapeStart
+        val end = shapeEnd
+        cancelShape()
+        if (entity == null || currentEditor == null || start == null || end == null) return
+        if (fogShape == FogShape.BRUSH || tool == MapTool.PAN) return
+
+        val (x0, y0) = mapToFogPoint(entity, start)
+        val (x1, y1) = mapToFogPoint(entity, end)
+        // A tap rather than a drag: nothing to fill.
+        if (abs(x1 - x0) < 1f || abs(y1 - y0) < 1f) return
+
+        val op = FogOp(
+            reveal = tool == MapTool.REVEAL,
+            radius = 0f,
+            softness = brushSoftness,
+            pts = listOf(x0, y0, x1, y1),
+            shape = fogShape,
+        )
+        val seq = currentEditor.applyOnce(op)
+        fogVersion++
+        app.displayHub.sendFogOps(seq, listOf(op))
+        refreshHistoryFlags()
+        scheduleFogSave()
+    }
+
+    private fun mapToFogPoint(entity: MapEntity, point: Pair<Float, Float>): Pair<Float, Float> =
+        (point.first * entity.fogW / entity.imageW) to (point.second * entity.fogH / entity.imageH)
 
     fun revealAll() = fill(fogged = false)
 

@@ -18,6 +18,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.Circle
+import androidx.compose.material.icons.filled.CropSquare
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.MoreVert
@@ -63,6 +65,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.rpgmaps.tabletop.display.protocol.FogShape
 import com.rpgmaps.tabletop.ui.display.CastButton
 import com.rpgmaps.tabletop.ui.display.DisplayStatusRow
 import kotlinx.coroutines.launch
@@ -426,13 +429,42 @@ private fun BarItem(content: @Composable () -> Unit) {
 private val BAR_ITEM_HEIGHT = 48.dp
 
 /**
- * Brush size and edge softness. Stacked in portrait, where two sliders and
- * their labels on one line leaves each of them too short to aim with.
+ * What a drag paints with, and how big and soft its edge is.
+ *
+ * Only shown while a fog tool is active, so the shape choice sits with the
+ * sliders it modifies. The size slider disappears for shapes: a dragged
+ * rectangle has no brush radius, and leaving a dead control on screen is worse
+ * than moving the live ones up.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun BrushControls(viewModel: MapViewModel) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val stacked = maxWidth < 600.dp
+        val freehand = viewModel.fogShape == FogShape.BRUSH
+
+        @Composable
+        fun shapePicker() = ControlRow {
+            BarItem {
+                ShapeChip("Brush", Icons.Default.Brush, freehand) {
+                    viewModel.setFogShape(FogShape.BRUSH)
+                }
+            }
+            BarItem {
+                ShapeChip(
+                    "Rectangle",
+                    Icons.Default.CropSquare,
+                    viewModel.fogShape == FogShape.RECT,
+                ) { viewModel.setFogShape(FogShape.RECT) }
+            }
+            BarItem {
+                ShapeChip(
+                    "Oval",
+                    Icons.Default.Circle,
+                    viewModel.fogShape == FogShape.OVAL,
+                ) { viewModel.setFogShape(FogShape.OVAL) }
+            }
+        }
 
         @Composable
         fun sizeSlider(modifier: Modifier) = Row(
@@ -440,7 +472,6 @@ private fun BrushControls(viewModel: MapViewModel) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Icon(Icons.Default.Brush, contentDescription = null)
             Text("Size", style = MaterialTheme.typography.labelLarge)
             Slider(
                 value = viewModel.brushRadiusMapPx,
@@ -465,21 +496,36 @@ private fun BrushControls(viewModel: MapViewModel) {
             )
         }
 
-        if (stacked) {
-            Column(Modifier.fillMaxWidth()) {
-                sizeSlider(Modifier.fillMaxWidth())
+        Column(
+            Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            shapePicker()
+            if (stacked) {
+                if (freehand) sizeSlider(Modifier.fillMaxWidth())
                 edgeSlider(Modifier.fillMaxWidth())
-            }
-        } else {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                sizeSlider(Modifier.weight(1f))
-                edgeSlider(Modifier.weight(0.7f))
+            } else {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    if (freehand) sizeSlider(Modifier.weight(1f))
+                    edgeSlider(Modifier.weight(if (freehand) 0.7f else 1f))
+                }
             }
         }
     }
+}
+
+/** Same look as the tool chips, so the two rows read as one set of choices. */
+@Composable
+private fun ShapeChip(label: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) },
+        leadingIcon = { Icon(icon, contentDescription = null, Modifier.width(18.dp)) },
+    )
 }
 
 @Composable

@@ -141,25 +141,54 @@ function fillFog(hidden) {
   g.restore();
 }
 
+/* Mirrors the constants of the same name in DisplayMessage.kt. */
+var SHAPE_SOFTNESS_FACTOR = 0.15;
+var MIN_BLUR_PX = 0.6;
+var MAX_SHAPE_BLUR_PX = 60;
+
 /**
- * Applies one brush stroke. Mirrors FogMask.apply() on the Android side:
- * same coordinate space (fog-mask pixels), same round caps and joins, same
- * blur-as-a-fraction-of-radius softness.
+ * Applies one fog op. Mirrors FogMask.apply() on the Android side: same
+ * coordinate space (fog-mask pixels), same round caps and joins, and the same
+ * softness sums -- radius-based for a brush, shorter-side-based for a shape.
+ * If these drift, the tablet and the TV disagree about where the fog ends.
  */
 function applyFogOp(op) {
-  if (!state.fogCtx || !op || !op.pts || op.pts.length < 2) return;
+  if (!state.fogCtx || !op || !op.pts) return;
   var g = state.fogCtx;
-  g.save();
+  var shape = op.shape || 'brush';
 
+  g.save();
   g.globalCompositeOperation = op.reveal ? 'destination-out' : 'source-over';
   g.strokeStyle = '#000';
   g.fillStyle = '#000';
+
+  if (shape === 'rect' || shape === 'oval') {
+    if (op.pts.length < 4) { g.restore(); return; }
+    var x0 = Math.min(op.pts[0], op.pts[2]), x1 = Math.max(op.pts[0], op.pts[2]);
+    var y0 = Math.min(op.pts[1], op.pts[3]), y1 = Math.max(op.pts[1], op.pts[3]);
+    var w = x1 - x0, h = y1 - y0;
+    if (w < 1 || h < 1) { g.restore(); return; }
+
+    var shapeBlur = Math.min(Math.min(w, h) * op.softness * SHAPE_SOFTNESS_FACTOR, MAX_SHAPE_BLUR_PX);
+    if (shapeBlur > 0) g.filter = 'blur(' + Math.max(MIN_BLUR_PX, shapeBlur) + 'px)';
+
+    g.beginPath();
+    if (shape === 'oval') {
+      g.ellipse(x0 + w / 2, y0 + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+    } else {
+      g.rect(x0, y0, w, h);
+    }
+    g.fill();
+    g.restore();
+    return;
+  }
+
+  if (op.pts.length < 2) { g.restore(); return; }
   g.lineWidth = op.radius * 2;
   g.lineCap = 'round';
   g.lineJoin = 'round';
-  if (op.softness > 0) {
-    g.filter = 'blur(' + Math.max(0.6, op.radius * op.softness) + 'px)';
-  }
+  var brushBlur = op.radius * op.softness;
+  if (brushBlur > 0) g.filter = 'blur(' + Math.max(MIN_BLUR_PX, brushBlur) + 'px)';
 
   if (op.pts.length === 2) {
     g.beginPath();
