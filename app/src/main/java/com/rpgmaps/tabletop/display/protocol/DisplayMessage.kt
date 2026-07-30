@@ -1,5 +1,12 @@
+// A custom class discriminator is still an experimental part of
+// kotlinx.serialization, but it is deliberate here rather than incidental: the
+// JavaScript receiver switches on a field named "t", and the default
+// "type" would mean maintaining a translation on one side or the other.
+@file:OptIn(ExperimentalSerializationApi::class)
+
 package com.rpgmaps.tabletop.display.protocol
 
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
