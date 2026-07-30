@@ -363,18 +363,20 @@ private fun MapControlBar(viewModel: MapViewModel) {
             ControlRow {
                 BarItem {
                     IconButton(onClick = { viewModel.rotateOutput(-1) }) {
-                        Icon(Icons.Default.RotateLeft, contentDescription = "Rotate view anticlockwise")
+                        Icon(Icons.Default.RotateLeft, contentDescription = "Rotate TV view anticlockwise")
                     }
                 }
+                // Labelled TV because it turns the players' screen only --
+                // this one stays upright.
                 BarItem {
                     Text(
-                        "${viewModel.rotationQuarters * 90}\u00B0",
+                        "TV ${viewModel.playerRotationQuarters * 90}\u00B0",
                         style = MaterialTheme.typography.labelLarge,
                     )
                 }
                 BarItem {
                     IconButton(onClick = { viewModel.rotateOutput(1) }) {
-                        Icon(Icons.Default.RotateRight, contentDescription = "Rotate view clockwise")
+                        Icon(Icons.Default.RotateRight, contentDescription = "Rotate TV view clockwise")
                     }
                 }
                 BarItem { OutlinedButton(onClick = viewModel::revealAll) { Text("Reveal all") } }

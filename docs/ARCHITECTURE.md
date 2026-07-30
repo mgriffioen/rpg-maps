@@ -58,21 +58,27 @@ compute the `halfH` that renders one battle square at one real inch.
 
 A TV lying flat on a table has no natural "up", so which edge the map reads
 from depends on where people are sitting. `RotationMessage` carries quarter
-turns, and it is applied by *both* renderers plus the DM's own canvas -- the
-same value for all three, so painting near the top of the tablet reveals the
-top of what the players see.
+turns.
 
-The one rule everything derives from: **`halfH` governs whichever screen axis
-is vertical after the rotation.** At 0 and 180 degrees that is the height; at
-90 and 270 it is the width. Three places implement it and must agree:
-`MapViewModel.framingExtent`, the receiver's `framing` in `draw()`, and
-`scaleToLife`, which otherwise sizes squares against the wrong edge.
+**It applies to the player view only.** The DM's canvas always draws upright.
+The first version turned both together, reasoning that the two screens should
+agree -- but they must not. The tablet is in your hands and you orient it by
+turning it; the TV lies flat facing the players, often at ninety degrees to
+you. Coupled, fixing the TV always broke the tablet. Fog lives in map
+coordinates, so the two views can differ freely.
 
-Gesture maths runs the transform backwards through `unrotate`, written as four
-quarter-turn cases rather than trigonometry so it stays exact.
+The rule the receiver derives from: **`halfH` governs whichever of *its* screen
+axes is vertical after the rotation.** At 0 and 180 degrees that is its height;
+at 90 and 270 its width. That is also why turning the picture is what makes a
+landscape signal fill a TV stood on its end. Two places implement it and must
+agree: the receiver's `framing` in `draw()`, and `scaleToLife`, which otherwise
+sizes battle squares against the wrong edge.
+
+`rotateOutput` deliberately does not touch the viewport. The DM's canvas is not
+rotating, so its framing must not move.
 
 Rotation is a global preference rather than a per-map column. It models where
-the DM sits, which does not change between maps, and keeping it out of the
+the TV sits, which does not change between maps, and keeping it out of the
 database avoided a schema migration on libraries that already have maps in
 them.
 
