@@ -1,0 +1,111 @@
+# Architecture
+
+Notes on why things are shaped the way they are, for when you come back to this
+in six months.
+
+## The one big idea
+
+There is **one player view**, `receiver/index.html`, and it runs everywhere: on
+a Chromecast, in a browser on your laptop, in a WebView on an Android TV. The
+tablet never renders a frame for the TV; it sends state, and the receiver draws.
+
+The alternative — rendering on the tablet and streaming pixels — was rejected
+because panning would be a slideshow over Cast's message channel. Sending
+"the viewport moved" is a few dozen bytes.
+
+The cost is that fog is drawn twice, once in Kotlin
+(`fog/FogMask.kt`) and once in JavaScript (`applyFogOp` in the receiver). Those
+two must stay visually equivalent: same coordinate space, same round caps, same
+blur-as-a-fraction-of-radius. If you change one, change the other.
+
+## Coordinate spaces
+
+Three, and keeping them straight is most of the work:
+
+| Space | Where it comes from | Used for |
+|---|---|---|
+| **Map pixels** | the *display render*, not the original file | viewport, grid, calibration |
+| **Fog pixels** | `FogMask.sizeFor()`, long edge capped at 1536 | every brush stroke |
+| **Screen pixels** | whatever device is drawing | nothing on the wire |
+
+Two decisions fall out of this:
+
+- **The display render is the source of truth, not the original image.** Import
+  downscales to 2048 px on the long edge and everything downstream uses that.
+  A 9000 px original would otherwise need tiled rendering to be viewable at all.
+  The original is kept so a different render size can be produced later.
+
+- **Fog strokes travel in fog pixels, not normalised coordinates.** The receiver
+  allocates a mask of exactly the announced size and replays the same ops, so
+  there is no normalisation to get subtly wrong and no aspect correction
+  anywhere.
+
+## The viewport is vertical
+
+`ViewportMessage` says "centre here, show this many map pixels above and below".
+It deliberately does not say how wide.
+
+The DM's tablet and the TV have different aspect ratios. If the sender dictated
+a rectangle, one of them would have to letterbox or crop. Instead the sender
+fixes the vertical framing and each receiver widens to its own aspect. A 16:9 TV
+shows more to the sides than a 4:3 preview, which is exactly what you want.
+
+This is also what makes *scale to life* possible: the receiver reports its pixel
+size in `ReceiverHello`, the DM enters the physical diagonal, and the sender can
+compute the `halfH` that renders one battle square at one real inch.
+
+## Display sinks
+
+`DisplaySink` has two implementations that differ in exactly one interesting
+way — how the map image gets across:
+
+- `LanSink` serves the bytes over HTTP and sends a URL. The receiver is on the
+  same Wi-Fi and can just fetch.
+- `CastSink` has no such option. A Chromecast receiver cannot reach the tablet,
+  so the JPEG is base64-encoded and pushed through the Cast message channel in
+  48 KB slices, each awaited before the next is sent. Awaiting is what keeps a
+  slow first-generation Chromecast from dropping the tail of the transfer, and
+  it gives an honest progress figure for free.
+
+Everything else — viewport, fog, grid, curtain — is small JSON and goes through
+`send()` unchanged.
+
+`DisplayHub` keeps a full snapshot of player-visible state and replays it
+whenever a sink reports a fresh connection or a receiver asks to resync. This is
+the most important thing in the display layer: mid-session a Chromecast *will*
+drop, and recovering without the DM noticing is the difference between a usable
+app and a toy.
+
+## Fog
+
+The mask is a bitmap, not a stroke list. Replaying strokes would make drawing
+cost grow through a session, and a three-hour dungeon crawl is a lot of strokes.
+
+Undo is a stack of PNG snapshots. That sounds expensive until you notice the
+mask is two-tone — black and transparent — so a 1536 px PNG of it is tens of
+kilobytes. Thirty levels of history costs a couple of megabytes.
+
+Strokes are **batched, not sent per touch event**. `FogEditor` buffers points
+and flushes every 40 ms; the flush produces one `FogOp` that is both drawn
+locally and sent over the wire. Applying the identical op on both sides is what
+keeps the tablet and the TV from drifting apart. Undo and redo cannot be
+expressed as an op, so those send the whole mask instead.
+
+## Threading
+
+Fog snapshots (`toPng`) run on the **main thread** on purpose, even though they
+take tens of milliseconds. The mask is mutated from the main thread while
+painting, so encoding it anywhere else risks a torn snapshot mid-stroke. A
+one-off frame hitch when a receiver connects is the better trade.
+
+The file write that follows *is* on IO, and is debounced ~1.2 s so a burst of
+brush strokes doesn't hammer flash.
+
+## What is deliberately not here
+
+- **Tiled rendering.** Capping the display render at 2048 px sidesteps it. If
+  you want to zoom deep into a 10000 px map, this is the thing to build.
+- **A `PresentationSink`** for HDMI second screens. The `DisplaySink` interface
+  exists partly so this can be added without touching anything else.
+- **Token / miniature tracking.** The TV is the map; real minis sit on it.
+- **Multiple maps on screen at once.**

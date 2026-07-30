@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose draws the real UI; this theme only covers the window before
+         the first frame, so it is deliberately dark to avoid a white flash. -->
+    <style name="Theme.RpgMaps" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/launch_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <!-- MediaRouteButton is a classic Android View and throws unless its
+         context resolves AppCompat attributes. CastButton wraps itself in
+         this theme rather than making the whole app an AppCompat app. -->
+    <style name="Theme.RpgMaps.MediaRoute" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="colorControlNormal">#E2E6EE</item>
+    </style>
+</resources>

@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RPG Maps - Player View</title>
+<!-- Inlined so the page never requests /favicon.ico, which the tablet's
+     server does not serve and which shows up as a console error on TVs. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%231b2130'/%3E%3Cpath d='M7 9l6-2 6 2 6-2v16l-6 2-6-2-6 2z' fill='%23e8c77a'/%3E%3C/svg%3E">
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    background: #000; overflow: hidden;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: #cfd6e4;
+    -webkit-user-select: none; user-select: none;
+    cursor: none;
+  }
+  #stage { display: block; width: 100vw; height: 100vh; }
+
+  #idle {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 1.2rem;
+    text-align: center; padding: 2rem; background: #05070c;
+  }
+  #idle.hidden { display: none; }
+  #idle h1 { font-size: clamp(1.4rem, 4vw, 2.6rem); margin: 0; font-weight: 600; letter-spacing: .02em; }
+  #idle p  { font-size: clamp(.85rem, 1.8vw, 1.15rem); margin: 0; color: #7e8ba3; max-width: 44ch; line-height: 1.5; }
+  #status { font-variant-numeric: tabular-nums; font-size: clamp(.75rem, 1.5vw, 1rem); color: #4c5a72; }
+  .dot { display:inline-block; width:.6em; height:.6em; border-radius:50%; margin-right:.5em; vertical-align:baseline; }
+  .dot.on  { background:#4ade80; }
+  .dot.off { background:#f87171; }
+
+  #curtain {
+    position: fixed; inset: 0; display: none;
+    align-items: center; justify-content: center;
+    background: #05070c; text-align: center; padding: 2rem;
+  }
+  #curtain.show { display: flex; }
+  #curtain span { font-size: clamp(1.2rem, 3.5vw, 2.4rem); color: #8f9ab2; }
+</style>
+</head>
+<body>
+
+<canvas id="stage"></canvas>
+
+<div id="idle">
+  <h1>RPG Maps</h1>
+  <p id="idleHint">Waiting for the map&hellip;</p>
+  <div id="status"><span class="dot off"></span><span id="statusText">connecting</span></div>
+</div>
+
+<div id="curtain"><span id="curtainText"></span></div>
+
+<script>
+'use strict';
+
+/* ------------------------------------------------------------------ *
+ * RPG Maps player view.
+ *
+ * Runs unchanged in two very different places:
+ *
+ *   1. As a Google Cast receiver on a Chromecast. The tablet cannot be
+ *      reached from there, so the map image arrives as base64 chunks over
+ *      the Cast message channel.
+ *   2. As an ordinary web page served by the tablet itself, over the local
+ *      network. Here the image is just a URL to fetch, and state arrives
+ *      over a WebSocket.
+ *
+ * Everything downstream of `handle()` is identical, which is the point:
+ * there is one implementation of fog and viewport maths to keep right.
+ * ------------------------------------------------------------------ */
+
+var NAMESPACE = 'urn:x-cast:com.rpgmaps.tabletop';
+
+/* ---------------------------- state ------------------------------- */
+
+var state = {
+  map: null,          // {mapId, name, imageW, imageH, fogW, fogH, imageRevision}
+  image: null,        // HTMLImageElement, once loaded
+  imageRevision: -1,
+  fog: null,          // offscreen canvas, black = hidden
+  fogCtx: null,
+  fogSeq: -1,
+  view: null,         // {cx, cy, halfH} currently rendered
+  targetView: null,   // {cx, cy, halfH} requested by the DM
+  grid: {enabled: false, pxPerSquare: 0, offsetX: 0, offsetY: 0, colorArgb: '#59FFFFFF'},
+  blank: {on: false, text: ''}
+};
+
+var chunks = {revision: -1, parts: [], have: 0, count: 0, mime: 'image/jpeg'};
+
+var stage = document.getElementById('stage');
+var ctx = stage.getContext('2d', {alpha: false});
+var idleEl = document.getElementById('idle');
+var idleHint = document.getElementById('idleHint');
+var statusText = document.getElementById('statusText');
+var statusDot = document.querySelector('#status .dot');
+var curtain = document.getElementById('curtain');
+var curtainText = document.getElementById('curtainText');
+
+/* --------------------------- canvas ------------------------------- */
+
+function resize() {
+  var dpr = window.devicePixelRatio || 1;
+  var w = Math.round(window.innerWidth * dpr);
+  var h = Math.round(window.innerHeight * dpr);
+  if (stage.width !== w || stage.height !== h) {
+    stage.width = w;
+    stage.height = h;
+    transport.announce();
+  }
+}
+window.addEventListener('resize', resize);
+
+/* ----------------------------- fog -------------------------------- */
+
+function ensureFog(w, h) {
+  if (state.fog && state.fog.width === w && state.fog.height === h) return;
+  var c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  state.fog = c;
+  state.fogCtx = c.getContext('2d');
+  fillFog(true);
+}
+
+function fillFog(hidden) {
+  if (!state.fogCtx) return;
+  var g = state.fogCtx;
+  g.save();
+  g.globalCompositeOperation = 'copy';
+  g.filter = 'none';
+  if (hidden) {
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, state.fog.width, state.fog.height);
+  } else {
+    g.clearRect(0, 0, state.fog.width, state.fog.height);
+  }
+  g.restore();
+}
+
+/**
+ * Applies one brush stroke. Mirrors FogMask.apply() on the Android side:
+ * same coordinate space (fog-mask pixels), same round caps and joins, same
+ * blur-as-a-fraction-of-radius softness.
+ */
+function applyFogOp(op) {
+  if (!state.fogCtx || !op || !op.pts || op.pts.length < 2) return;
+  var g = state.fogCtx;
+  g.save();
+
+  g.globalCompositeOperation = op.reveal ? 'destination-out' : 'source-over';
+  g.strokeStyle = '#000';
+  g.fillStyle = '#000';
+  g.lineWidth = op.radius * 2;
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  if (op.softness > 0) {
+    g.filter = 'blur(' + Math.max(0.6, op.radius * op.softness) + 'px)';
+  }
+
+  if (op.pts.length === 2) {
+    g.beginPath();
+    g.arc(op.pts[0], op.pts[1], op.radius, 0, Math.PI * 2);
+    g.fill();
+  } else {
+    g.beginPath();
+    g.moveTo(op.pts[0], op.pts[1]);
+    for (var i = 2; i + 1 < op.pts.length; i += 2) g.lineTo(op.pts[i], op.pts[i + 1]);
+    g.stroke();
+  }
+  g.restore();
+}
+
+function restoreFogFromPng(base64) {
+  var img = new Image();
+  img.onload = function () {
+    if (!state.fogCtx) return;
+    var g = state.fogCtx;
+    g.save();
+    g.globalCompositeOperation = 'copy';
+    g.filter = 'none';
+    g.drawImage(img, 0, 0, state.fog.width, state.fog.height);
+    g.restore();
+  };
+  img.src = 'data:image/png;base64,' + base64;
+}
+
+/* --------------------------- messages ----------------------------- */
+
+function handle(msg) {
+  if (!msg || typeof msg !== 'object') return;
+
+  switch (msg.t) {
+    case 'map':
+      state.map = msg;
+      ensureFog(msg.fogW, msg.fogH);
+      // A new map invalidates any image still arriving for the old one.
+      if (msg.imageRevision !== state.imageRevision) {
+        state.image = null;
+        resetChunks(msg.imageRevision);
+      }
+      idleHint.textContent = 'Loading ' + (msg.name || 'map') + '…';
+      break;
+
+    case 'imgurl':
+      loadImage(msg.url, msg.imageRevision);
+      break;
+
+    case 'img':
+      acceptChunk(msg);
+      break;
+
+    case 'view':
+      state.targetView = {cx: msg.cx, cy: msg.cy, halfH: msg.halfH};
+      if (!state.view) state.view = {cx: msg.cx, cy: msg.cy, halfH: msg.halfH};
+      break;
+
+    case 'fog':
+      // A gap means we missed a stroke; ask for the whole mask rather than
+      // quietly showing players terrain they should not see.
+      if (state.fogSeq >= 0 && msg.seq > state.fogSeq + msg.ops.length) {
+        transport.send({t: 'resync', haveSeq: state.fogSeq});
+      }
+      for (var i = 0; i < msg.ops.length; i++) applyFogOp(msg.ops[i]);
+      state.fogSeq = msg.seq;
+      break;
+
+    case 'fogset':
+      restoreFogFromPng(msg.png);
+      state.fogSeq = msg.seq;
+      break;
+
+    case 'fogfill':
+      fillFog(msg.fogged);
+      state.fogSeq = msg.seq;
+      break;
+
+    case 'grid':
+      state.grid = msg;
+      break;
+
+    case 'blank':
+      state.blank = msg;
+      curtainText.textContent = msg.text || '';
+      curtain.classList.toggle('show', !!msg.on && !!state.map);
+      break;
+  }
+
+  idleEl.classList.toggle('hidden', !!(state.map && state.image));
+}
+
+function resetChunks(revision) {
+  chunks = {revision: revision, parts: [], have: 0, count: 0, mime: 'image/jpeg'};
+}
+
+function acceptChunk(msg) {
+  // Ignore stragglers from a map the DM has already moved on from.
+  if (state.map && msg.imageRevision !== state.map.imageRevision) return;
+  if (chunks.revision !== msg.imageRevision) resetChunks(msg.imageRevision);
+
+  if (chunks.parts[msg.index] === undefined) chunks.have++;
+  chunks.parts[msg.index] = msg.data;
+  chunks.count = msg.count;
+  chunks.mime = msg.mime;
+
+  idleHint.textContent = 'Receiving map… ' +
+    Math.round((chunks.have / Math.max(1, msg.count)) * 100) + '%';
+
+  if (chunks.have === msg.count) {
+    loadImage('data:' + chunks.mime + ';base64,' + chunks.parts.join(''), msg.imageRevision);
+  }
+}
+
+function loadImage(src, revision) {
+  var img = new Image();
+  img.onload = function () {
+    state.image = img;
+    state.imageRevision = revision;
+    idleEl.classList.add('hidden');
+  };
+  img.onerror = function () {
+    idleHint.textContent = 'Could not load the map image.';
+  };
+  img.src = src;
+}
+
+/* ---------------------------- render ------------------------------ */
+
+function argbToCss(argb) {
+  // Android writes #AARRGGBB; CSS wants #RRGGBBAA.
+  if (typeof argb !== 'string') return 'rgba(255,255,255,.35)';
+  var s = argb.replace('#', '');
+  if (s.length === 8) return '#' + s.slice(2) + s.slice(0, 2);
+  return '#' + s;
+}
+
+function render() {
+  requestAnimationFrame(render);
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, stage.width, stage.height);
+
+  if (!state.image || !state.map || !state.view) return;
+
+  // Ease towards the requested viewport. The DM's pan arrives at 25 Hz; this
+  // turns those steps into a continuous glide without adding real latency.
+  var t = state.targetView;
+  if (t) {
+    var k = 0.35;
+    var v = state.view;
+    v.cx += (t.cx - v.cx) * k;
+    v.cy += (t.cy - v.cy) * k;
+    v.halfH += (t.halfH - v.halfH) * k;
+    if (Math.abs(t.cx - v.cx) < 0.5) v.cx = t.cx;
+    if (Math.abs(t.cy - v.cy) < 0.5) v.cy = t.cy;
+    if (Math.abs(t.halfH - v.halfH) < 0.5) v.halfH = t.halfH;
+  }
+
+  var view = state.view;
+  var scale = stage.height / (2 * Math.max(1, view.halfH));
+
+  ctx.setTransform(
+    scale, 0, 0, scale,
+    stage.width / 2 - view.cx * scale,
+    stage.height / 2 - view.cy * scale
+  );
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(state.image, 0, 0, state.map.imageW, state.map.imageH);
+
+  if (state.grid.enabled && state.grid.pxPerSquare > 2) {
+    drawGrid(scale);
+  }
+
+  if (state.fog) {
+    ctx.drawImage(state.fog, 0, 0, state.map.imageW, state.map.imageH);
+  }
+}
+
+function drawGrid(scale) {
+  var g = state.grid;
+  var m = state.map;
+  ctx.save();
+  ctx.strokeStyle = argbToCss(g.colorArgb);
+  ctx.lineWidth = 1.2 / scale;   // constant hairline regardless of zoom
+  ctx.beginPath();
+  var startX = g.offsetX % g.pxPerSquare;
+  for (var x = startX; x <= m.imageW; x += g.pxPerSquare) {
+    ctx.moveTo(x, 0); ctx.lineTo(x, m.imageH);
+  }
+  var startY = g.offsetY % g.pxPerSquare;
+  for (var y = startY; y <= m.imageH; y += g.pxPerSquare) {
+    ctx.moveTo(0, y); ctx.lineTo(m.imageW, y);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* --------------------------- transport ---------------------------- */
+
+function setStatus(text, ok) {
+  statusText.textContent = text;
+  statusDot.className = 'dot ' + (ok ? 'on' : 'off');
+}
+
+var transport = {
+  send: function () {},
+  announce: function () {
+    transport.send({t: 'hello', w: stage.width, h: stage.height, label: transport.label || ''});
+  },
+  label: ''
+};
+
+function startCastTransport() {
+  transport.label = 'Chromecast';
+  var script = document.createElement('script');
+  script.src = 'https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js';
+  script.onload = function () {
+    var context = cast.framework.CastReceiverContext.getInstance();
+    var senderId = null;
+
+    context.addCustomMessageListener(NAMESPACE, function (event) {
+      senderId = event.senderId;
+      var data = event.data;
+      if (typeof data === 'string') { try { data = JSON.parse(data); } catch (e) { return; } }
+      handle(data);
+    });
+
+    transport.send = function (obj) {
+      try { context.sendCustomMessage(NAMESPACE, senderId, obj); } catch (e) { /* no sender yet */ }
+    };
+
+    context.addEventListener(cast.framework.system.EventType.SENDER_CONNECTED, function () {
+      setStatus('tablet connected', true);
+      transport.announce();
+    });
+    context.addEventListener(cast.framework.system.EventType.SENDER_DISCONNECTED, function () {
+      setStatus('tablet disconnected', false);
+    });
+
+    var options = new cast.framework.CastReceiverOptions();
+    options.customNamespaces = {};
+    options.customNamespaces[NAMESPACE] = cast.framework.system.MessageType.JSON;
+    // Without this the receiver quits after a few minutes with no media
+    // playing -- which, for a map that is simply sitting on the table
+    // between encounters, is exactly the wrong behaviour.
+    options.disableIdleTimeout = true;
+    context.start(options);
+
+    setStatus('waiting for the tablet', false);
+  };
+  script.onerror = function () {
+    setStatus('could not load the Cast SDK', false);
+  };
+  document.head.appendChild(script);
+}
+
+function startSocketTransport() {
+  transport.label = 'Local network';
+  var socket = null;
+  var retryMs = 500;
+
+  function connect() {
+    var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    socket = new WebSocket(proto + location.host + '/ws');
+
+    socket.onopen = function () {
+      retryMs = 500;
+      setStatus('connected to the tablet', true);
+      transport.announce();
+      // Ask for everything: this may be a reconnect after a Wi-Fi blip.
+      transport.send({t: 'resync', haveSeq: state.fogSeq});
+    };
+    socket.onmessage = function (event) {
+      try { handle(JSON.parse(event.data)); } catch (e) { /* ignore junk */ }
+    };
+    socket.onclose = function () {
+      setStatus('reconnecting…', false);
+      idleEl.classList.remove('hidden');
+      // Back off, but stay responsive enough to recover during a session.
+      setTimeout(connect, retryMs);
+      retryMs = Math.min(retryMs * 2, 5000);
+    };
+    socket.onerror = function () { try { socket.close(); } catch (e) {} };
+  }
+
+  transport.send = function (obj) {
+    if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(obj));
+  };
+
+  connect();
+}
+
+/* ----------------------------- boot ------------------------------- */
+
+resize();
+requestAnimationFrame(render);
+
+// A Chromecast always identifies itself with "CrKey". `?mode=cast` is an
+// escape hatch for testing the Cast path in a desktop browser.
+if (/CrKey/.test(navigator.userAgent) || /[?&]mode=cast\b/.test(location.search)) {
+  startCastTransport();
+} else {
+  startSocketTransport();
+}
+
+// Exposed so the test harness in tools/ can drive the page without a server.
+window.__rpgmaps = {handle: handle, state: state};
+</script>
+</body>
+</html>

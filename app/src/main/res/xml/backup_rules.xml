@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Map images can be very large; leave them out of cloud backup. -->
+    <exclude domain="file" path="maps/" />
+    <exclude domain="file" path="thumbs/" />
+</full-backup-content>
