@@ -16,6 +16,7 @@ import com.rpgmaps.tabletop.data.db.MapEntity
 import com.rpgmaps.tabletop.display.protocol.BlankMessage
 import com.rpgmaps.tabletop.display.protocol.GridMessage
 import com.rpgmaps.tabletop.display.protocol.MapAnnounced
+import com.rpgmaps.tabletop.display.protocol.RotationMessage
 import com.rpgmaps.tabletop.display.protocol.ViewportMessage
 import com.rpgmaps.tabletop.fog.FogEditor
 import com.rpgmaps.tabletop.fog.FogMask
@@ -123,6 +124,34 @@ class MapViewModel(
     var gridEnabled by mutableStateOf(false)
         private set
 
+    /**
+     * Quarter-turns clockwise applied to the player view *and* this canvas.
+     *
+     * Both together on purpose: a DM reading a flat TV from one side wants the
+     * map to face the table, and wants their own screen to agree with it so
+     * that painting near the top of the tablet reveals the top of what the
+     * players are looking at.
+     */
+    var rotationQuarters by mutableStateOf(0)
+        private set
+
+    /** Rotates by [delta] quarter turns. Remembered across maps and sessions. */
+    fun rotateOutput(delta: Int) {
+        val extentBefore = framingExtent()
+        rotationQuarters = (rotationQuarters + delta).mod(4)
+        val extentAfter = framingExtent()
+
+        // A quarter turn swaps which screen axis halfH is measured against, so
+        // leaving halfH alone would silently change the zoom. Scaling it by the
+        // same ratio keeps the map exactly the size it was and only turns it.
+        if (extentBefore > 0f && extentAfter > 0f) {
+            applyView(view.copy(halfH = view.halfH * (extentAfter / extentBefore)))
+        }
+
+        app.displayHub.setRotation(RotationMessage(rotationQuarters))
+        viewModelScope.launch { app.settings.setRotationQuarters(rotationQuarters) }
+    }
+
     // --- calibration ------------------------------------------------------
 
     /**
@@ -218,7 +247,8 @@ class MapViewModel(
             fogImage = mask.bitmap.asImageBitmap()
 
             gridEnabled = entity.gridEnabled
-            view = fitViewFor(entity, canvasW / canvasH)
+            rotationQuarters = settings.rotationQuarters
+            view = fitViewFor(entity, rotatedAspect())
 
             app.repository.markOpened(mapId)
             present(entity)
@@ -238,6 +268,7 @@ class MapViewModel(
 
         // Seed the hub with this map's framing first: presentMap pushes full
         // state asynchronously and will include whatever viewport is set.
+        app.displayHub.setRotation(RotationMessage(rotationQuarters))
         pushGrid(entity)
         pushViewport(force = true)
 
@@ -269,22 +300,51 @@ class MapViewModel(
         val first = canvasW == 1f && canvasH == 1f
         canvasW = width
         canvasH = height
-        if (first) map.value?.let { view = fitViewFor(it, width / height) }
+        if (first) map.value?.let { view = fitViewFor(it, rotatedAspect()) }
+    }
+
+    /**
+     * The screen axis that [ViewState.halfH] governs. Under a quarter turn the
+     * map's vertical runs across the screen, so the framing is set by the
+     * canvas *width*. Both renderers and all the gesture maths derive from
+     * this one rule.
+     */
+    private fun framingExtent(): Float =
+        if (rotationQuarters % 2 == 0) canvasH else canvasW
+
+    /** The canvas aspect as the map sees it, i.e. after rotation. */
+    private fun rotatedAspect(): Float {
+        val aspect = if (rotationQuarters % 2 == 0) canvasW / canvasH else canvasH / canvasW
+        return if (aspect.isFinite() && aspect > 0f) aspect else 16f / 9f
     }
 
     /** Screen pixels per map pixel at the current zoom. */
-    fun scale(): Float = canvasH / (2f * view.halfH.coerceAtLeast(1f))
+    fun scale(): Float = framingExtent() / (2f * view.halfH.coerceAtLeast(1f))
+
+    /**
+     * Undoes the display rotation on a screen-space delta, turning a finger
+     * movement back into a movement across the map. Written as quarter-turn
+     * cases rather than trigonometry so it stays exact.
+     */
+    private fun unrotate(dx: Float, dy: Float): Pair<Float, Float> = when (rotationQuarters) {
+        1 -> dy to -dx
+        2 -> -dx to -dy
+        3 -> -dy to dx
+        else -> dx to dy
+    }
 
     fun screenToMap(x: Float, y: Float): Pair<Float, Float> {
         val s = scale()
-        return (view.cx + (x - canvasW / 2f) / s) to (view.cy + (y - canvasH / 2f) / s)
+        val (mx, my) = unrotate((x - canvasW / 2f) / s, (y - canvasH / 2f) / s)
+        return (view.cx + mx) to (view.cy + my)
     }
 
     // --- viewport ---------------------------------------------------------
 
     fun pan(dxScreen: Float, dyScreen: Float) {
         val s = scale()
-        applyView(view.copy(cx = view.cx - dxScreen / s, cy = view.cy - dyScreen / s))
+        val (mdx, mdy) = unrotate(dxScreen / s, dyScreen / s)
+        applyView(view.copy(cx = view.cx - mdx, cy = view.cy - mdy))
     }
 
     /** Pinch zoom about a screen-space focal point, so the map stays put under the fingers. */
@@ -292,14 +352,9 @@ class MapViewModel(
         if (factor <= 0f || !factor.isFinite()) return
         val (mx, my) = screenToMap(focusX, focusY)
         val newHalfH = clampHalfH(view.halfH / factor)
-        val s = canvasH / (2f * newHalfH)
-        applyView(
-            ViewState(
-                cx = mx - (focusX - canvasW / 2f) / s,
-                cy = my - (focusY - canvasH / 2f) / s,
-                halfH = newHalfH,
-            )
-        )
+        val s = framingExtent() / (2f * newHalfH)
+        val (ox, oy) = unrotate((focusX - canvasW / 2f) / s, (focusY - canvasH / 2f) / s)
+        applyView(ViewState(cx = mx - ox, cy = my - oy, halfH = newHalfH))
     }
 
     /**
@@ -328,7 +383,7 @@ class MapViewModel(
 
     fun fitToScreen() {
         val entity = map.value ?: return
-        applyView(fitViewFor(entity, canvasW / canvasH))
+        applyView(fitViewFor(entity, rotatedAspect()))
     }
 
     private fun fitViewFor(entity: MapEntity, aspect: Float): ViewState {
@@ -378,7 +433,12 @@ class MapViewModel(
         val tvPpi = diagonalPx / diagonalInches
         // One square must occupy one inch, i.e. tvPpi screen pixels.
         val screenPxPerMapPx = tvPpi / entity.pxPerSquare
-        val halfH = (status.receiverH / 2f) / screenPxPerMapPx
+        // Under a quarter turn the receiver frames on its width, so that is the
+        // extent halfH has to be measured against. The diagonal above is
+        // rotation-invariant, so only this line needs to know.
+        val framingPx =
+            if (rotationQuarters % 2 == 0) status.receiverH.toFloat() else status.receiverW.toFloat()
+        val halfH = (framingPx / 2f) / screenPxPerMapPx
 
         val wasFrozen = tvFrozen
         tvFrozen = false

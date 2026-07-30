@@ -136,6 +136,24 @@ data class GridMessage(
     val colorArgb: String = "#59FFFFFF",
 ) : DisplayMessage
 
+/**
+ * Quarter-turns clockwise the receiver applies to everything it draws, 0..3.
+ *
+ * With a TV lying flat on the table there is no natural "up", so which edge
+ * the map reads from is a property of where people are sitting. Rotation is a
+ * separate message from [ViewportMessage] because it changes once at setup
+ * while the viewport changes 25 times a second.
+ *
+ * It does interact with framing, though: at 90 and 270 degrees the screen axis
+ * that [ViewportMessage.halfH] governs is the receiver's *width*. Both
+ * renderers work that out from this value rather than being told.
+ */
+@Serializable
+@SerialName("rot")
+data class RotationMessage(
+    val quarters: Int,
+) : DisplayMessage
+
 /** Hides the map behind a curtain without losing any state. */
 @Serializable
 @SerialName("blank")

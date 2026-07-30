@@ -85,7 +85,8 @@ var state = {
   view: null,         // {cx, cy, halfH} currently rendered
   targetView: null,   // {cx, cy, halfH} requested by the DM
   grid: {enabled: false, pxPerSquare: 0, offsetX: 0, offsetY: 0, colorArgb: '#59FFFFFF'},
-  blank: {on: false, text: ''}
+  blank: {on: false, text: ''},
+  rot: 0              // quarter-turns clockwise, 0..3
 };
 
 var chunks = {revision: -1, parts: [], have: 0, count: 0, mime: 'image/jpeg'};
@@ -241,6 +242,11 @@ function handle(msg) {
       state.grid = msg;
       break;
 
+    case 'rot':
+      state.rot = ((msg.quarters % 4) + 4) % 4;
+      applyOverlayRotation();
+      break;
+
     case 'blank':
       state.blank = msg;
       curtainText.textContent = msg.text || '';
@@ -323,13 +329,18 @@ function draw() {
   }
 
   var view = state.view;
-  var scale = stage.height / (2 * Math.max(1, view.halfH));
+  var quarters = state.rot & 3;
 
-  ctx.setTransform(
-    scale, 0, 0, scale,
-    stage.width / 2 - view.cx * scale,
-    stage.height / 2 - view.cy * scale
-  );
+  // halfH is measured against whichever screen axis is "vertical" once the
+  // rotation is applied -- the width, under a quarter turn.
+  var framing = (quarters % 2 === 0) ? stage.height : stage.width;
+  var scale = framing / (2 * Math.max(1, view.halfH));
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.translate(stage.width / 2, stage.height / 2);
+  if (quarters) ctx.rotate(quarters * Math.PI / 2);
+  ctx.scale(scale, scale);
+  ctx.translate(-view.cx, -view.cy);
 
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
@@ -384,6 +395,17 @@ function drawGrid(scale) {
 }
 
 /* --------------------------- transport ---------------------------- */
+
+/**
+ * The curtain and idle screens are DOM, so the canvas rotation does not touch
+ * them. Turn their text too, otherwise a message meant for players sitting
+ * around a flat TV arrives sideways.
+ */
+function applyOverlayRotation() {
+  var css = 'rotate(' + ((state.rot & 3) * 90) + 'deg)';
+  curtainText.style.transform = css;
+  idleEl.style.transform = css;
+}
 
 function setStatus(text, ok) {
   statusText.textContent = text;

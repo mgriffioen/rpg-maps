@@ -45,11 +45,13 @@ fun MapCanvas(
     val entity by viewModel.map.collectAsState()
     val statuses by viewModel.displayStatuses.collectAsState()
 
-    // The TV's aspect ratio, so the outline we draw matches what it really
-    // shows. 16:9 until a receiver tells us otherwise.
-    val tvAspect = statuses.firstOrNull { it.receiverW > 0 && it.receiverH > 0 }
+    // The TV's aspect ratio as the map sees it, so the outline matches what it
+    // really shows. A quarter turn swaps the receiver's axes along with ours.
+    // 16:9 until a receiver tells us otherwise.
+    val rawTvAspect = statuses.firstOrNull { it.receiverW > 0 && it.receiverH > 0 }
         ?.let { it.receiverW.toFloat() / it.receiverH.toFloat() }
         ?: (16f / 9f)
+    val tvAspect = if (viewModel.rotationQuarters % 2 == 0) rawTvAspect else 1f / rawTvAspect
 
     Box(
         modifier = modifier
@@ -67,13 +69,19 @@ fun MapCanvas(
             val image = mapImage ?: return@Canvas
             val view = viewModel.view
 
-            val scale = size.height / (2f * view.halfH.coerceAtLeast(1f))
-            val left = size.width / 2f - view.cx * scale
-            val top = size.height / 2f - view.cy * scale
+            val quarters = viewModel.rotationQuarters
+            // halfH is measured against whichever screen axis is "vertical"
+            // once the rotation is applied.
+            val framing = if (quarters % 2 == 0) size.height else size.width
+            val scale = framing / (2f * view.halfH.coerceAtLeast(1f))
 
+            // Reads bottom-up: shift the map's centre to the origin, scale,
+            // turn, then move to the middle of the canvas.
             withTransform({
-                translate(left, top)
+                translate(size.width / 2f, size.height / 2f)
+                rotate(degrees = quarters * 90f, pivot = Offset.Zero)
                 scale(scale, scale, pivot = Offset.Zero)
+                translate(-view.cx, -view.cy)
             }) {
                 drawImage(
                     image = image,

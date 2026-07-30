@@ -11,6 +11,7 @@ import com.rpgmaps.tabletop.display.protocol.FogResetMessage
 import com.rpgmaps.tabletop.display.protocol.GridMessage
 import com.rpgmaps.tabletop.display.protocol.MapAnnounced
 import com.rpgmaps.tabletop.display.protocol.ResyncRequest
+import com.rpgmaps.tabletop.display.protocol.RotationMessage
 import com.rpgmaps.tabletop.display.protocol.ViewportMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -81,6 +82,7 @@ class DisplayHub(private val scope: CoroutineScope) {
     @Volatile private var fogSeq: Long = 0
     @Volatile private var grid: GridMessage = GridMessage(false, 0f, 0f, 0f)
     @Volatile private var blank: BlankMessage = BlankMessage(false)
+    @Volatile private var rotation: RotationMessage = RotationMessage(0)
 
     /** Latest requested viewport, published on a timer -- see [viewportPump]. */
     @Volatile private var pendingViewport: ViewportMessage? = null
@@ -204,6 +206,11 @@ class DisplayHub(private val scope: CoroutineScope) {
         broadcast(spec)
     }
 
+    fun setRotation(spec: RotationMessage) {
+        rotation = spec
+        broadcast(spec)
+    }
+
     /** Clears the player view back to the idle screen. */
     fun clearMap() {
         scope.launch {
@@ -252,6 +259,7 @@ class DisplayHub(private val scope: CoroutineScope) {
         val seq: Long
         val gridSpec: GridMessage
         val blankSpec: BlankMessage
+        val rotationSpec: RotationMessage
 
         lock.withLock {
             announcement = announced
@@ -262,6 +270,7 @@ class DisplayHub(private val scope: CoroutineScope) {
             seq = fogSeq
             gridSpec = grid
             blankSpec = blank
+            rotationSpec = rotation
         }
 
         try {
@@ -270,6 +279,9 @@ class DisplayHub(private val scope: CoroutineScope) {
                 return
             }
 
+            // Rotation first: it decides which screen axis halfH governs, so
+            // sending it after the viewport would frame one frame wrongly.
+            sink.send(rotationSpec)
             sink.send(announcement)
             sink.presentImage(revision, bytes, mime)
 

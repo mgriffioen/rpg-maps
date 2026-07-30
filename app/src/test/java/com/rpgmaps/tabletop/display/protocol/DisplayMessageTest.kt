@@ -34,6 +34,7 @@ class DisplayMessageTest {
             FogResetMessage(8, "iVBORw0KGgo="),
             FogFillMessage(9, fogged = true),
             GridMessage(true, 64f, 3f, 5f),
+            RotationMessage(3),
             BlankMessage(true, "Back in ten"),
             ReceiverHello(1920, 1080, "Chromecast"),
             ResyncRequest(4),
@@ -68,6 +69,17 @@ class DisplayMessageTest {
         assertEquals(PONG_JSON, encode(Pong))
         assertEquals(Ping, decode(PING_JSON))
         assertEquals(Pong, decode(PONG_JSON))
+    }
+
+    /**
+     * The receiver switches on "rot" and reads `quarters`; both renderers use
+     * it to decide which screen axis halfH is measured against, so a rename
+     * here would silently mis-frame the player view rather than fail loudly.
+     */
+    @Test
+    fun `rotation is sent as quarter turns under the rot tag`() {
+        val json = encode(RotationMessage(1))
+        assertEquals("""{"t":"rot","quarters":1}""", json)
     }
 
     @Test

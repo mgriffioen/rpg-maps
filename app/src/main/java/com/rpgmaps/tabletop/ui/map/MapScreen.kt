@@ -2,16 +2,16 @@ package com.rpgmaps.tabletop.ui.map
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
@@ -21,6 +21,8 @@ import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PanTool
+import androidx.compose.material.icons.filled.RotateLeft
+import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -277,6 +279,7 @@ private fun GridAlignDialog(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MapControlBar(viewModel: MapViewModel) {
     Surface(
@@ -287,14 +290,18 @@ private fun MapControlBar(viewModel: MapViewModel) {
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
+            /*
+             * FlowRow rather than a horizontally scrolling Row. Held in
+             * portrait the old bar ran off the side, which put "Reveal all"
+             * and the TV controls behind a sideways scroll -- exactly the
+             * things you reach for mid-encounter without looking.
+             */
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 ToolChip("Pan", Icons.Default.PanTool, viewModel.tool == MapTool.PAN) {
                     viewModel.tool = MapTool.PAN
@@ -306,8 +313,6 @@ private fun MapControlBar(viewModel: MapViewModel) {
                     viewModel.tool = MapTool.HIDE
                 }
 
-                Spacer(Modifier.width(4.dp))
-
                 IconButton(onClick = viewModel::undo, enabled = viewModel.canUndo) {
                     Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
                 }
@@ -317,8 +322,6 @@ private fun MapControlBar(viewModel: MapViewModel) {
 
                 OutlinedButton(onClick = viewModel::revealAll) { Text("Reveal all") }
                 OutlinedButton(onClick = viewModel::hideAll) { Text("Hide all") }
-
-                Spacer(Modifier.width(4.dp))
 
                 // Freezing lets the DM scout ahead without dragging the
                 // players' view along.
@@ -336,30 +339,92 @@ private fun MapControlBar(viewModel: MapViewModel) {
                     onClick = viewModel::toggleBlank,
                     label = { Text(if (viewModel.blanked) "TV hidden" else "Hide TV") },
                 )
+
+                RotateControl(
+                    quarters = viewModel.rotationQuarters,
+                    onRotate = viewModel::rotateOutput,
+                )
             }
 
             if (viewModel.tool != MapTool.PAN) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Icon(Icons.Default.Brush, contentDescription = null)
-                    Text("Brush", style = MaterialTheme.typography.labelLarge)
-                    Slider(
-                        value = viewModel.brushRadiusMapPx,
-                        onValueChange = viewModel::updateBrushRadius,
-                        valueRange = 15f..400f,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text("Edge", style = MaterialTheme.typography.labelLarge)
-                    Slider(
-                        value = viewModel.brushSoftness,
-                        onValueChange = viewModel::updateBrushSoftness,
-                        valueRange = 0f..0.9f,
-                        modifier = Modifier.weight(0.6f),
-                    )
-                }
+                BrushControls(viewModel)
+            }
+        }
+    }
+}
+
+/**
+ * Turns the map and the player view together, in quarter steps.
+ *
+ * A TV lying flat on the table has no natural "up", so which way the map faces
+ * depends on where people are sitting. The label shows the current angle
+ * because after a couple of taps it stops being obvious.
+ */
+@Composable
+private fun RotateControl(quarters: Int, onRotate: (Int) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = { onRotate(-1) }) {
+            Icon(Icons.Default.RotateLeft, contentDescription = "Rotate view anticlockwise")
+        }
+        Text("${quarters * 90}\u00B0", style = MaterialTheme.typography.labelLarge)
+        IconButton(onClick = { onRotate(1) }) {
+            Icon(Icons.Default.RotateRight, contentDescription = "Rotate view clockwise")
+        }
+    }
+}
+
+/**
+ * Brush size and edge softness. Stacked in portrait, where two sliders and
+ * their labels on one line leaves each of them too short to aim with.
+ */
+@Composable
+private fun BrushControls(viewModel: MapViewModel) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val stacked = maxWidth < 600.dp
+
+        @Composable
+        fun sizeSlider(modifier: Modifier) = Row(
+            modifier,
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.Default.Brush, contentDescription = null)
+            Text("Size", style = MaterialTheme.typography.labelLarge)
+            Slider(
+                value = viewModel.brushRadiusMapPx,
+                onValueChange = viewModel::updateBrushRadius,
+                valueRange = 15f..400f,
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        @Composable
+        fun edgeSlider(modifier: Modifier) = Row(
+            modifier,
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Edge", style = MaterialTheme.typography.labelLarge)
+            Slider(
+                value = viewModel.brushSoftness,
+                onValueChange = viewModel::updateBrushSoftness,
+                valueRange = 0f..0.9f,
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        if (stacked) {
+            Column(Modifier.fillMaxWidth()) {
+                sizeSlider(Modifier.fillMaxWidth())
+                edgeSlider(Modifier.fillMaxWidth())
+            }
+        } else {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                sizeSlider(Modifier.weight(1f))
+                edgeSlider(Modifier.weight(0.7f))
             }
         }
     }

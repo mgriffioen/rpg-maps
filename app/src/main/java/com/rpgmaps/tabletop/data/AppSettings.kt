@@ -24,6 +24,16 @@ class AppSettings(private val context: Context) {
         val brushSoftness: Float = 0.35f,
         val blankText: String = "",
         val serverPort: Int = DEFAULT_PORT,
+        /**
+         * Quarter-turns clockwise applied to both the player view and the DM's
+         * own canvas, 0..3.
+         *
+         * Global rather than per-map because it models where the DM sits
+         * relative to a TV lying flat on the table, which does not change from
+         * one map to the next. Keeping it out of the database also avoids a
+         * schema migration on a library people already have maps in.
+         */
+        val rotationQuarters: Int = 0,
     )
 
     val flow: Flow<Snapshot> = context.settingsStore.data.map { p ->
@@ -34,6 +44,7 @@ class AppSettings(private val context: Context) {
             brushSoftness = p[KEY_BRUSH_SOFTNESS] ?: 0.35f,
             blankText = p[KEY_BLANK_TEXT] ?: "",
             serverPort = p[KEY_SERVER_PORT] ?: DEFAULT_PORT,
+            rotationQuarters = (p[KEY_ROTATION] ?: 0).mod(4),
         )
     }
 
@@ -43,6 +54,7 @@ class AppSettings(private val context: Context) {
     suspend fun setBrushSoftness(value: Float) = put(KEY_BRUSH_SOFTNESS, value)
     suspend fun setBlankText(value: String) = put(KEY_BLANK_TEXT, value)
     suspend fun setServerPort(value: Int) = put(KEY_SERVER_PORT, value)
+    suspend fun setRotationQuarters(value: Int) = put(KEY_ROTATION, value.mod(4))
 
     private suspend fun <T> put(key: Preferences.Key<T>, value: T) {
         context.settingsStore.edit { it[key] = value }
@@ -58,5 +70,6 @@ class AppSettings(private val context: Context) {
         private val KEY_BRUSH_SOFTNESS = floatPreferencesKey("brush_softness")
         private val KEY_BLANK_TEXT = stringPreferencesKey("blank_text")
         private val KEY_SERVER_PORT = intPreferencesKey("server_port")
+        private val KEY_ROTATION = intPreferencesKey("rotation_quarters")
     }
 }

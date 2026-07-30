@@ -54,6 +54,28 @@ This is also what makes *scale to life* possible: the receiver reports its pixel
 size in `ReceiverHello`, the DM enters the physical diagonal, and the sender can
 compute the `halfH` that renders one battle square at one real inch.
 
+## Rotation
+
+A TV lying flat on a table has no natural "up", so which edge the map reads
+from depends on where people are sitting. `RotationMessage` carries quarter
+turns, and it is applied by *both* renderers plus the DM's own canvas -- the
+same value for all three, so painting near the top of the tablet reveals the
+top of what the players see.
+
+The one rule everything derives from: **`halfH` governs whichever screen axis
+is vertical after the rotation.** At 0 and 180 degrees that is the height; at
+90 and 270 it is the width. Three places implement it and must agree:
+`MapViewModel.framingExtent`, the receiver's `framing` in `draw()`, and
+`scaleToLife`, which otherwise sizes squares against the wrong edge.
+
+Gesture maths runs the transform backwards through `unrotate`, written as four
+quarter-turn cases rather than trigonometry so it stays exact.
+
+Rotation is a global preference rather than a per-map column. It models where
+the DM sits, which does not change between maps, and keeping it out of the
+database avoided a schema migration on libraries that already have maps in
+them.
+
 ## Display sinks
 
 `DisplaySink` has two implementations that differ in exactly one interesting
