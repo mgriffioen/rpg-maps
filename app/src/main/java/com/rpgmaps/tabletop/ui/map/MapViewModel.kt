@@ -40,6 +40,9 @@ enum class MapTool { PAN, REVEAL, HIDE }
 /** A view of the map, in map pixels. Matches the wire viewport exactly. */
 data class ViewState(val cx: Float, val cy: Float, val halfH: Float)
 
+/** An unsaved grid, previewed on the DM canvas while a dialog is open. */
+data class GridPreview(val pxPerSquare: Float, val offsetX: Float, val offsetY: Float)
+
 class MapViewModel(
     private val app: RpgMapsApplication,
     private val mapId: String,
@@ -136,6 +139,22 @@ class MapViewModel(
     var measureEnd by mutableStateOf<Pair<Float, Float>?>(null)
         private set
 
+    /**
+     * Candidate grid drawn on the DM canvas while the calibration or alignment
+     * dialog is open, so the offset sliders can be judged against the map art
+     * instead of adjusted blind.
+     */
+    var gridPreview by mutableStateOf<GridPreview?>(null)
+        private set
+
+    fun previewGrid(pxPerSquare: Float, offsetX: Float, offsetY: Float) {
+        gridPreview = if (pxPerSquare > 1f) GridPreview(pxPerSquare, offsetX, offsetY) else null
+    }
+
+    fun clearGridPreview() {
+        gridPreview = null
+    }
+
     val measuredMapPx: Float
         get() {
             val a = measureStart ?: return 0f
@@ -154,6 +173,7 @@ class MapViewModel(
         calibrating = false
         measureStart = null
         measureEnd = null
+        gridPreview = null
     }
 
     fun beginMeasure(screenX: Float, screenY: Float) {

@@ -81,7 +81,21 @@ fun MapCanvas(
                     dstSize = IntSize(map.imageW, map.imageH),
                 )
 
-                if (viewModel.gridEnabled && map.pxPerSquare > 1f) {
+                // An unsaved grid wins, so the offset sliders can be judged
+                // against the map art while their dialog is open.
+                val preview = viewModel.gridPreview
+                if (preview != null) {
+                    drawGrid(
+                        pxPerSquare = preview.pxPerSquare,
+                        offsetX = preview.offsetX,
+                        offsetY = preview.offsetY,
+                        width = map.imageW.toFloat(),
+                        height = map.imageH.toFloat(),
+                        strokeWidth = 1.6f / scale,
+                        color = Color(0xFFFFD479),
+                        alpha = 0.85f,
+                    )
+                } else if (viewModel.gridEnabled && map.pxPerSquare > 1f) {
                     drawGrid(
                         pxPerSquare = map.pxPerSquare,
                         offsetX = map.gridOffsetX,
@@ -126,18 +140,20 @@ private fun DrawScope.drawGrid(
     width: Float,
     height: Float,
     strokeWidth: Float,
+    color: Color = Color.White,
+    alpha: Float = 0.30f,
 ) {
     if (pxPerSquare <= 1f) return
-    val color = Color.White.copy(alpha = 0.30f)
+    val lineColor = color.copy(alpha = alpha)
 
     var x = offsetX % pxPerSquare
     while (x <= width) {
-        drawLine(color, Offset(x, 0f), Offset(x, height), strokeWidth)
+        drawLine(lineColor, Offset(x, 0f), Offset(x, height), strokeWidth)
         x += pxPerSquare
     }
     var y = offsetY % pxPerSquare
     while (y <= height) {
-        drawLine(color, Offset(0f, y), Offset(width, y), strokeWidth)
+        drawLine(lineColor, Offset(0f, y), Offset(width, y), strokeWidth)
         y += pxPerSquare
     }
 }

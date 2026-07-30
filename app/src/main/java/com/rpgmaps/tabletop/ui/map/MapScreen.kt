@@ -81,6 +81,7 @@ fun MapScreen(
     val scope = rememberCoroutineScope()
     var menuOpen by remember { mutableStateOf(false) }
     var showCalibrationDialog by remember { mutableStateOf(false) }
+    var showAlignDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(error) {
         error?.let {
@@ -128,10 +129,19 @@ fun MapScreen(
                             leadingIcon = { Icon(Icons.Default.Straighten, null) },
                             onClick = {
                                 menuOpen = false
+                                // Only arm the ruler. The dialog opens after a
+                                // measurement exists -- opening it here would
+                                // cover the map you have to drag across.
                                 viewModel.startCalibration()
-                                showCalibrationDialog = true
                             },
                         )
+                        if ((entity?.pxPerSquare ?: 0f) > 1f) {
+                            DropdownMenuItem(
+                                text = { Text("Adjust grid alignment") },
+                                leadingIcon = { Icon(Icons.Default.GridOn, null) },
+                                onClick = { menuOpen = false; showAlignDialog = true },
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Scale to life on TV") },
                             onClick = {
@@ -186,16 +196,85 @@ fun MapScreen(
         CalibrationDialog(
             measuredMapPx = viewModel.measuredMapPx,
             initialPxPerSquare = entity?.pxPerSquare ?: 0f,
+            onPreview = viewModel::previewGrid,
             onDismiss = {
                 showCalibrationDialog = false
                 viewModel.cancelCalibration()
             },
             onSave = { squares, offsetX, offsetY ->
                 viewModel.calibrate(viewModel.measuredMapPx, squares, offsetX, offsetY)
+                viewModel.clearGridPreview()
                 showCalibrationDialog = false
             },
         )
     }
+
+    if (showAlignDialog) {
+        val current = entity
+        if (current == null || current.pxPerSquare <= 1f) {
+            showAlignDialog = false
+        } else {
+            GridAlignDialog(
+                pxPerSquare = current.pxPerSquare,
+                initialOffsetX = current.gridOffsetX,
+                initialOffsetY = current.gridOffsetY,
+                onPreview = { x, y -> viewModel.previewGrid(current.pxPerSquare, x, y) },
+                onDismiss = {
+                    viewModel.clearGridPreview()
+                    showAlignDialog = false
+                },
+                onSave = { x, y ->
+                    viewModel.setGridOffset(x, y)
+                    viewModel.clearGridPreview()
+                    showAlignDialog = false
+                },
+            )
+        }
+    }
+}
+
+/**
+ * Nudges an already-calibrated grid onto the lines drawn in the map art,
+ * without re-measuring. The map stays visible around the dialog and shows the
+ * candidate grid live, which is the only way these sliders mean anything.
+ */
+@Composable
+private fun GridAlignDialog(
+    pxPerSquare: Float,
+    initialOffsetX: Float,
+    initialOffsetY: Float,
+    onPreview: (Float, Float) -> Unit,
+    onDismiss: () -> Unit,
+    onSave: (Float, Float) -> Unit,
+) {
+    var offsetX by remember { mutableStateOf(initialOffsetX) }
+    var offsetY by remember { mutableStateOf(initialOffsetY) }
+
+    LaunchedEffect(Unit) { onPreview(offsetX, offsetY) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Grid alignment") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("One square = %.1f px. Slide until the gold grid sits on the map's own lines.".format(pxPerSquare))
+                Text("Across", style = MaterialTheme.typography.labelLarge)
+                Slider(
+                    value = offsetX,
+                    onValueChange = { offsetX = it; onPreview(it, offsetY) },
+                    valueRange = 0f..pxPerSquare,
+                )
+                Text("Down", style = MaterialTheme.typography.labelLarge)
+                Slider(
+                    value = offsetY,
+                    onValueChange = { offsetY = it; onPreview(offsetX, it) },
+                    valueRange = 0f..pxPerSquare,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(offsetX, offsetY) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
@@ -335,6 +414,7 @@ private fun CalibrationHint(
 private fun CalibrationDialog(
     measuredMapPx: Float,
     initialPxPerSquare: Float,
+    onPreview: (pxPerSquare: Float, offsetX: Float, offsetY: Float) -> Unit,
     onDismiss: () -> Unit,
     onSave: (squares: Float, offsetX: Float, offsetY: Float) -> Unit,
 ) {
@@ -344,6 +424,9 @@ private fun CalibrationDialog(
 
     val squares = squaresText.toFloatOrNull() ?: 0f
     val perSquare = if (squares > 0f) measuredMapPx / squares else initialPxPerSquare
+
+    // Keep the gold grid on the map in step with the fields behind the dialog.
+    LaunchedEffect(perSquare, offsetX, offsetY) { onPreview(perSquare, offsetX, offsetY) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -363,7 +446,7 @@ private fun CalibrationDialog(
                         style = MaterialTheme.typography.labelLarge,
                     )
                 }
-                Text("Nudge the grid to line up with the map art:")
+                Text("Nudge the gold grid onto the map's own lines:")
                 Slider(
                     value = offsetX,
                     onValueChange = { offsetX = it },
