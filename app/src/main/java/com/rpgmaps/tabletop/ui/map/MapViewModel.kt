@@ -108,7 +108,10 @@ class MapViewModel(
     var fogShape by mutableStateOf(FogShape.BRUSH)
         private set
 
-    fun setFogShape(shape: FogShape) {
+    // update*, not set*: `setFogShape(FogShape)` is the JVM signature Kotlin
+    // already generates for the property, and declaring both is a platform
+    // declaration clash. tools/check-declaration-clashes.sh catches this.
+    fun updateFogShape(shape: FogShape) {
         if (shapeStart != null) cancelShape()
         fogShape = shape
     }

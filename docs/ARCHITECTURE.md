@@ -151,6 +151,18 @@ snapshot mid-stroke; a one-off frame hitch when a receiver connects is the
 better trade. The file write that follows *is* on IO, debounced ~1.2 s so a
 burst of strokes doesn't hammer flash.
 
+## A trap worth knowing about
+
+Kotlin generates a JVM setter for every non-private `var`, including one marked
+`private set`. Writing a function of the same name -- the natural thing to do
+when setting a property should also have a side effect, like persisting it or
+mirroring it to the TV -- is a duplicate JVM method, and the build fails with
+*"Platform declaration clash"*.
+
+This project hit it three times: `setView`, `setBrushSoftness`, `setFogShape`.
+The convention is to name those functions `update*`, `apply*` or `select*`
+instead, and `tools/check-declaration-clashes.sh` finds any that slip through.
+
 ## What is deliberately not here
 
 - **Tiled rendering.** Capping the display render at 2048 px sidesteps it. If

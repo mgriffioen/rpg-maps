@@ -112,6 +112,13 @@ for you via `Build → Generate Signed App Bundle / APK`.
 These cover the wire protocol and the image/fog sizing maths. They run on the
 JVM, so no tablet or emulator is needed.
 
+There is also a quick static check for a Kotlin footgun this project has hit
+more than once:
+
+```bash
+tools/check-declaration-clashes.sh
+```
+
 ## Troubleshooting
 
 **The app installs but the map list is empty after a reinstall.** Map images

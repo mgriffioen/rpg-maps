@@ -447,7 +447,7 @@ private fun BrushControls(viewModel: MapViewModel) {
         fun shapePicker() = ControlRow {
             BarItem {
                 ShapeChip("Brush", Icons.Default.Brush, freehand) {
-                    viewModel.setFogShape(FogShape.BRUSH)
+                    viewModel.updateFogShape(FogShape.BRUSH)
                 }
             }
             BarItem {
@@ -455,14 +455,14 @@ private fun BrushControls(viewModel: MapViewModel) {
                     "Rectangle",
                     Icons.Default.CropSquare,
                     viewModel.fogShape == FogShape.RECT,
-                ) { viewModel.setFogShape(FogShape.RECT) }
+                ) { viewModel.updateFogShape(FogShape.RECT) }
             }
             BarItem {
                 ShapeChip(
                     "Oval",
                     Icons.Default.Circle,
                     viewModel.fogShape == FogShape.OVAL,
-                ) { viewModel.setFogShape(FogShape.OVAL) }
+                ) { viewModel.updateFogShape(FogShape.OVAL) }
             }
         }
 
