@@ -47,10 +47,37 @@ android {
         resValue("string", "cast_app_id", "CC1AD845")
     }
 
+    /**
+     * A debug key that lives in the repository, so every build signs the same.
+     *
+     * Without this, AGP creates `~/.android/debug.keystore` on demand and each
+     * machine gets its own. A CI runner starts with an empty home directory,
+     * so *every* build produced a differently-signed APK, and Android refuses
+     * to update an app whose signing key changed: the only way to install a
+     * new build was to uninstall the old one, taking the map library and all
+     * the fog with it.
+     *
+     * Committing a private key is normally wrong. This one is the standard
+     * Android debug key in everything but bytes: the password is `android`,
+     * it is written here in plain text, and it signs nothing that is
+     * distributed. It exists to make one tablet's installs upgradable. A
+     * release key would be kept out of the repository -- but this app has no
+     * release channel to protect.
+     */
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
             isDebuggable = true
+            signingConfig = signingConfigs.getByName("debug")
         }
         release {
             isMinifyEnabled = true

@@ -205,6 +205,49 @@ and sign it. There is no reason to bother for a tablet you own.
 ## Updating later
 
 Repeat whichever route you used and install over the top. Your map library,
-fog and settings live in the app's own storage and survive a reinstall — as
-long as you don't uninstall first, and as long as the application ID hasn't
-changed.
+fog and settings live in the app's own storage and survive that.
+
+### If an update refuses to install
+
+Android will not replace an app with one signed by a different key. It reports
+this as *"App not installed"* or a package conflict, and the only way out is to
+uninstall — which takes the map library with it.
+
+Builds used to hit this every time. AGP creates `~/.android/debug.keystore` on
+demand if it does not find one, so each machine signed with its own key, and a
+CI runner starts with an empty home directory — meaning **every** build was
+signed differently. `app/debug.keystore` is now committed and wired into
+`signingConfigs`, so every build, local or CI, signs identically.
+
+That fix cannot reach backwards. An app already installed from an
+older build carries one of the random keys, so **one final uninstall is
+needed**, and updates work from then on.
+
+### Keeping your maps across that last uninstall
+
+The debug build is debuggable, which means `adb run-as` can read its private
+storage. That is enough to carry everything over: the map library
+(`files/maps/`), the database (`databases/rpgmaps.db`) and your settings
+(`datastore/`).
+
+With the old version still installed:
+
+```bash
+PKG=com.rpgmaps.tabletop.debug
+adb exec-out run-as $PKG tar c -C /data/data/$PKG . > rpgmaps-backup.tar
+```
+
+Uninstall, install the new build, then **launch it once and close it** so it
+creates its storage. Then:
+
+```bash
+adb push rpgmaps-backup.tar /data/local/tmp/
+adb shell run-as $PKG tar x -C /data/data/$PKG -f /data/local/tmp/rpgmaps-backup.tar
+adb shell run-as $PKG rm /data/local/tmp/rpgmaps-backup.tar
+adb shell am force-stop $PKG
+```
+
+Open it again and the library should be as you left it.
+
+If that looks like more trouble than re-importing a handful of maps, it
+probably is — this is here for the session where it isn't.
