@@ -72,7 +72,7 @@ class DisplayService : Service() {
             return START_NOT_STICKY
         }
 
-        startForeground(buildNotification(detail = null))
+        enterForeground(buildNotification(detail = null))
         observeStatus()
 
         // START_STICKY would have Android restart this with a null intent
@@ -104,7 +104,7 @@ class DisplayService : Service() {
         }
     }
 
-    private fun startForeground(notification: Notification) {
+    private fun enterForeground(notification: Notification) {
         try {
             // ServiceCompat ignores the type below API 29, where it did not
             // exist; from 34 it is mandatory and must match the manifest.

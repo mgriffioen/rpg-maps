@@ -57,8 +57,10 @@ class RpgMapsApplication : Application() {
         // and Android 12+ refuses a foreground-service start from the
         // background. Tied to it rather than to the app being alive, because
         // an ongoing notification with nothing on the TV is just noise.
+        // No distinctUntilChanged: presenting is a StateFlow, which already
+        // conflates equal values, and Kotlin rejects the redundant operator.
         appScope.launch {
-            displayHub.presenting.distinctUntilChanged().collect { presenting ->
+            displayHub.presenting.collect { presenting ->
                 if (presenting) {
                     DisplayService.start(this@RpgMapsApplication)
                 } else {
