@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The themed-icon layer (Android 13+), which the system fills with a single
+    colour taken from the user's wallpaper. It cannot be the artwork itself:
+    map.png is opaque almost everywhere, so tinting its alpha would produce a
+    featureless slab.
+
+    So this traces the same scroll as a silhouette. The landmass is a hole
+    rather than a shape, because a solid blob inside a solid panel would be
+    invisible once both are the same colour.
+
+    Laid out to match tools/generate-launcher-icon.py: the same 108dp canvas,
+    with the art 58dp wide and centred, so the two layers line up and neither
+    strays outside the 72dp the launcher actually shows.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!--
+        Parchment panel, with the landmass and two legend marks knocked out of
+        it. The panel is deliberately shorter than the rollers so their capsule
+        ends stand clear at the top and bottom. Flush with them, the three
+        shapes merge into one featureless slab once they are all the same
+        colour.
+    -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M30,36 H78 V72 H30 Z
+                          M40,48 L47,44 L53,49 L59,46 L62,53 L56,58 L58,64 L48,65 L42,60 L38,54 Z
+                          M64,42 H71 V45 H64 Z
+                          M63,49 H70 V52 H63 Z" />
+
+    <!-- Left roller. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M30,28 A5,5 0 0 1 35,33 V75 A5,5 0 0 1 25,75 V33 A5,5 0 0 1 30,28 Z" />
+
+    <!-- Right roller. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M78,28 A5,5 0 0 1 83,33 V75 A5,5 0 0 1 73,75 V33 A5,5 0 0 1 78,28 Z" />
+</vector>
