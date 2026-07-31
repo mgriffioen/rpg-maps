@@ -49,6 +49,31 @@ jobs:
       - name: Assemble debug APK
         run: ./gradlew --no-daemon assembleDebug
 
+      # Android refuses to update an app whose signing key changed, so a build
+      # signed with the wrong key is not a cosmetic problem: it forces an
+      # uninstall, and the map library goes with it. This used to happen on
+      # every build, because AGP quietly creates ~/.android/debug.keystore when
+      # it cannot find one and a fresh runner has no such file.
+      #
+      # The expected fingerprint is read from the committed keystore rather
+      # than hardcoded, so replacing the key needs no edit here -- what is
+      # being checked is that the APK was signed with *that* file.
+      - name: Verify the APK is signed with the committed debug key
+        run: |
+          set -euo pipefail
+          expected=$(keytool -list -v -keystore app/debug.keystore -storepass android \
+            | grep -m1 'SHA256:' | sed 's/.*SHA256: //' | tr -d ': \r' | tr 'A-Z' 'a-z')
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          actual=$("$apksigner" verify --print-certs app/build/outputs/apk/debug/*.apk \
+            | grep -m1 -i 'SHA-256 digest' | sed 's/.*: *//' | tr -d ' \r' | tr 'A-Z' 'a-z')
+          echo "expected $expected"
+          echo "actual   $actual"
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::APK signed with an unexpected key; installs would need an uninstall first."
+            exit 1
+          fi
+          echo "Signing key matches app/debug.keystore."
+
       # Always available, on every push and pull request, under the run's
       # Artifacts section. GitHub wraps artifacts in a zip.
       - name: Upload APK as a build artifact
