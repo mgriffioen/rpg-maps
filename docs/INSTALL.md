@@ -27,6 +27,46 @@ source*.
 If you can't find it, download the APK first and tap it — Android will refuse
 and offer a *Settings* button that jumps straight to the right screen.
 
+## And then Play Protect will block it anyway
+
+That permission gets you past the first gate. Play Protect is a second one,
+and on a recent tablet it usually fires: *"Unsafe app blocked"*, or
+*"App scan required"*.
+
+It is not reacting to anything in this app. It flags **any** APK signed with a
+debug key by a developer it has never heard of, which is exactly what a build
+of your own is. The app asks for four permissions, all networking, and touches
+nothing else on the tablet — you can check that yourself in
+`app/src/main/AndroidManifest.xml`.
+
+Three ways through, most reliable first.
+
+**1. Install with `adb` instead.** The block is part of the tap-to-install
+flow. Going through `adb` uses a different path and does not hit it — this is
+the developer channel, and you are the developer. See
+[route 3](#route-3-installing-with-adb) below; platform-tools is a ~15 MB
+download and works over Wi-Fi, so no cable is needed.
+
+If a device is set to verify `adb` installs too, this turns that off:
+
+```bash
+adb shell settings put global verifier_verify_adb_installs 0
+```
+
+**2. Install anyway.** On the block dialog, tap **More details** →
+**Install anyway**. Google keeps moving where this lives, and on some builds
+it is missing entirely — hence it being second.
+
+**3. Turn Play Protect off for a minute.** Play Store → your profile icon →
+**Play Protect** → the gear → turn off **Scan apps with Play Protect**.
+Install, then **turn it back on**. It is worth having on for everything that
+did not come out of your own CI.
+
+> A release signing key does not help here. Play Protect's objection is that
+> it does not recognise the signer, and a keystore you generated yourself is
+> just as unknown to it as the debug one. The only thing that clears it is
+> distribution through the Play Store, which this app has no reason to be in.
+
 ---
 
 ## Route 1: let GitHub build it
