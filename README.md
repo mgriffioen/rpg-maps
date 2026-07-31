@@ -81,12 +81,16 @@ docs/                    setup, installing, casting, architecture
 
 ## Status
 
-Everything above is implemented. What has **not** happened yet is a real build:
-this was written in an environment with no Android SDK available, so the first
-`Gradle sync` and the first `Run` will happen on your machine. See
-[docs/SETUP.md](docs/SETUP.md#if-gradle-sync-fails) for what to do if a
-dependency version needs bumping — that is the most likely first hiccup, and
-Android Studio fixes it with two clicks.
+Everything above is implemented, and it **compiles**: the `Build APK` workflow
+assembles a debug APK and runs the unit tests on every push. Most of this was
+written in an environment with no Android SDK, so that is worth stating rather
+than assuming.
 
-The player view *has* been tested end to end in a real browser against the real
-protocol, including the chunked image transfer that Chromecast needs.
+What has still not happened is a session at a real table. The player view *has*
+been tested end to end in a real browser against the real protocol, including
+the chunked image transfer Chromecast needs, and soft fog edges are checked
+both with and without `ctx.filter` so Safari is covered.
+
+If a dependency version ever needs bumping, see
+[docs/SETUP.md](docs/SETUP.md#if-gradle-sync-fails) — Android Studio fixes that
+with two clicks.

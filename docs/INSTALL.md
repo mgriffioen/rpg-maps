@@ -55,11 +55,9 @@ to a prerelease tagged `latest-debug`. On the tablet, go to the repository's
 extracting. The URL is stable, so bookmark it; re-running the workflow replaces
 the file at the same address.
 
-> **The first run will probably fail, and that is useful.** Nothing in this
-> project has ever been compiled — it was written without an Android SDK
-> available. The workflow runs the unit tests before assembling, so the log
-> will name the file and line of anything that needs fixing. That is a far
-> better error report than a red squiggle in an IDE.
+> The workflow runs the unit tests before assembling, so if something is
+> broken you get a file and line number in the log rather than a crash on the
+> tablet.
 
 ## Route 2: build it yourself from a terminal
 
