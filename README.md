@@ -33,14 +33,17 @@ middle of the table as the battle map.
 
 ## Getting it running
 
-Full walkthrough in **[docs/SETUP.md](docs/SETUP.md)** — it assumes you have
-never built an Android app before.
-
-The short version:
+With Android Studio — full walkthrough in **[docs/SETUP.md](docs/SETUP.md)**,
+written for someone who has never built an Android app:
 
 1. Install [Android Studio](https://developer.android.com/studio).
 2. `File → Open` this folder and let it sync.
 3. Turn on developer mode + USB debugging on the tablet, plug it in, press Run.
+
+Without it — see **[docs/INSTALL.md](docs/INSTALL.md)**. The easiest route
+installs nothing on your machine at all: the **Build APK** workflow builds it
+on GitHub, and you download the APK on the tablet and tap it. There are also
+command-line and `adb` routes.
 
 ## Getting it onto the TV
 
@@ -72,7 +75,8 @@ app/                     the Android app (Kotlin, Jetpack Compose)
 receiver/index.html      the player view — one file, runs on Chromecast and in
                          any browser. Bundled into the APK at build time and
                          served from GitHub Pages for Cast.
-docs/                    setup, casting, architecture
+docs/                    setup, installing, casting, architecture
+.github/workflows/       builds an installable APK on every push
 ```
 
 ## Status

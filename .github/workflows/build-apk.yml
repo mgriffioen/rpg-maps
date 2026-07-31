@@ -1,0 +1,69 @@
+# Builds an installable APK in the cloud, so getting the app onto the tablet
+# needs nothing installed on your own machine -- no Android Studio, no SDK, no
+# JDK. See docs/INSTALL.md for what to do with the result.
+name: Build APK
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  # Lets you build on demand from the Actions tab. Only a manual run publishes
+  # the "latest-debug" release, so the download link the tablet uses changes
+  # when you say so rather than on every push.
+  workflow_dispatch:
+
+jobs:
+  debug-apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # AGP 8.13 needs JDK 17 or newer.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Installs the Android command-line tools and accepts the SDK licences,
+      # which is what lets Gradle fetch the compileSdk 36 platform by itself.
+      - uses: android-actions/setup-android@v3
+
+      # Caches the Gradle distribution and dependency downloads between runs.
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Unit tests first: a failure here is a real bug, and it is much easier
+      # to read than the same problem surfacing as a crash on the tablet.
+      - name: Unit tests
+        run: ./gradlew --no-daemon test
+
+      - name: Assemble debug APK
+        run: ./gradlew --no-daemon assembleDebug
+
+      # Always available, on every push and pull request, under the run's
+      # Artifacts section. GitHub wraps artifacts in a zip.
+      - name: Upload APK as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpg-maps-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      # A release asset is a plain file rather than a zip, so the tablet can
+      # download and open it in one tap -- no unzipping app required. The tag
+      # is reused, so the download URL never changes.
+      - name: Publish to the latest-debug release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view latest-debug >/dev/null 2>&1 || \
+            gh release create latest-debug \
+              --prerelease \
+              --target "$GITHUB_SHA" \
+              --title "Latest debug build" \
+              --notes "Debug build of the RPG Maps tablet app. Rebuilt by running the Build APK workflow from the Actions tab."
+          gh release upload latest-debug app/build/outputs/apk/debug/*.apk --clobber

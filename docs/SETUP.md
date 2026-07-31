@@ -3,6 +3,12 @@
 Written for someone who has never built an Android app. If a step already looks
 familiar, skip it.
 
+> **Don't want Android Studio?** You don't need it. See
+> **[INSTALL.md](INSTALL.md)** — the easiest route installs nothing on your
+> machine at all: GitHub builds the APK and you download it on the tablet.
+> Come back here if you want to change the code, which is much nicer with an
+> IDE.
+
 ---
 
 ## 1. Install Android Studio
