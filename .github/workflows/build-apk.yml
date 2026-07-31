@@ -36,8 +36,15 @@ jobs:
 
       # Unit tests first: a failure here is a real bug, and it is much easier
       # to read than the same problem surfacing as a crash on the tablet.
+      #
+      # testDebugUnitTest, not test. The plain `test` task runs the release
+      # variant's tests too, which drags the whole release pipeline in --
+      # KSP, R8 minification, resource shrinking -- for a workflow that only
+      # ever ships a debug APK. It is not just slow: it was also where a KSP
+      # worker failed on a restored build cache, breaking a build for reasons
+      # that had nothing to do with the code under test.
       - name: Unit tests
-        run: ./gradlew --no-daemon test
+        run: ./gradlew --no-daemon testDebugUnitTest
 
       - name: Assemble debug APK
         run: ./gradlew --no-daemon assembleDebug
