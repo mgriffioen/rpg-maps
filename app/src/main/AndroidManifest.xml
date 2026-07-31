@@ -6,8 +6,20 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <!-- Chromecast discovery is mDNS, which needs multicast on the Wi-Fi radio. -->
+    <!-- Chromecast discovery is mDNS, which needs multicast on the Wi-Fi radio.
+         This permission also satisfies the prerequisite for the connectedDevice
+         foreground service type below. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
+    <!-- Keeping the players' screen live while the DM is in another app. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- Required to hold a WifiLock, which stops Wi-Fi power saving parking the
+         radio between fog updates. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Android 13+. Without it the service still runs, but its notification is
+         hidden and there is no visible way to stop it. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- The app is usable on a phone, but it is designed for a large screen. -->
     <supports-screens
@@ -38,6 +50,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Keeps the LAN server and the Cast session running once the DM
+             switches to another app. See DisplayService for why the type is
+             connectedDevice rather than dataSync. -->
+        <service
+            android:name=".display.DisplayService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
 
         <!-- Tells the Cast framework which receiver application to launch.
              See CastOptionsProvider and docs/CASTING.md. -->

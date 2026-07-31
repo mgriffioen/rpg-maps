@@ -30,6 +30,9 @@ middle of the table as the battle map.
   both screens at once, so your tablet stays a preview of what the table sees.
   Both are remembered between sessions.
 - **Curtain.** Hide the TV during a break without losing any state.
+- **Keeps running when you switch apps.** Look up a rule, roll dice, answer a
+  message — the players' screen stays live. A notification shows the address
+  and stops it when the session ends.
 
 ## Getting it running
 

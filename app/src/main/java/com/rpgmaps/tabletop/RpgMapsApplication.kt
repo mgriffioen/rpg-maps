@@ -4,6 +4,7 @@ import android.app.Application
 import com.rpgmaps.tabletop.data.AppSettings
 import com.rpgmaps.tabletop.data.MapRepository
 import com.rpgmaps.tabletop.display.DisplayHub
+import com.rpgmaps.tabletop.display.DisplayService
 import com.rpgmaps.tabletop.display.cast.CastSink
 import com.rpgmaps.tabletop.display.lan.LanSink
 import kotlinx.coroutines.CoroutineScope
@@ -49,6 +50,22 @@ class RpgMapsApplication : Application() {
 
         displayHub.attach(castSink)
         displayHub.attach(lanSink)
+
+        // Run the foreground service exactly while the players have a map in
+        // front of them. Tied to that rather than to a receiver connecting,
+        // because presenting a map happens while the app is in the foreground
+        // and Android 12+ refuses a foreground-service start from the
+        // background. Tied to it rather than to the app being alive, because
+        // an ongoing notification with nothing on the TV is just noise.
+        appScope.launch {
+            displayHub.presenting.distinctUntilChanged().collect { presenting ->
+                if (presenting) {
+                    DisplayService.start(this@RpgMapsApplication)
+                } else {
+                    DisplayService.stop(this@RpgMapsApplication)
+                }
+            }
+        }
 
         // Re-bind the server if the DM picks a different port in settings.
         appScope.launch {

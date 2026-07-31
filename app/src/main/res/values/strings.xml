@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">RPG Maps</string>
+
+    <!-- The ongoing notification for the foreground service that keeps the
+         player view alive while the DM uses other apps. -->
+    <string name="display_notification_channel">Player display</string>
+    <string name="display_notification_channel_description">Shown while the players\' screen is live, so Android keeps the map running when you switch apps.</string>
+    <string name="display_notification_title">Map is live on the players\' screen</string>
+    <string name="display_notification_idle">Waiting for a display to connect</string>
+    <string name="display_notification_stop">Stop</string>
 </resources>

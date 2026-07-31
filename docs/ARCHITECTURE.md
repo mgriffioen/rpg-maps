@@ -117,6 +117,42 @@ the most important thing in the display layer: mid-session a Chromecast *will*
 drop, and recovering without the DM noticing is the difference between a usable
 app and a toy.
 
+## Staying alive in the background
+
+Nothing in this app ever stopped the LAN server or the Cast session — the hub
+and its sinks live on the `Application`, started once in `onCreate`. And yet
+the TV froze the moment the DM switched to a dice roller. That is Android: a
+process with no foreground component is a candidate for the cached-app
+freezer, and a frozen process cannot service a socket.
+
+`DisplayService` is the fix, and the interesting decision is its **type**.
+Android 14 requires one, and the two plausible choices behave very
+differently:
+
+- `dataSync` is the obvious-looking pick and the wrong one. Android 15 caps it
+  at six hours in any 24 and then stops the service — which is precisely the
+  failure this class exists to prevent, just later in the evening. A long
+  session can genuinely reach six hours.
+- `connectedDevice` has no such budget and is the honest description: the app
+  is driving an external display. Its prerequisite is one of a short list of
+  permissions, satisfied by `CHANGE_WIFI_MULTICAST_STATE`, which the app
+  already holds for Chromecast discovery.
+
+The service runs **exactly while a map is presented** — `DisplayHub.presenting`
+— rather than for the app's lifetime or while a receiver is connected. Not the
+app's lifetime, because an ongoing notification with nothing on the TV is
+noise. Not receiver-connected, because Android 12+ refuses a foreground-service
+start from the background, and a receiver can connect at any time; presenting
+a map always happens with the app on screen.
+
+It also holds a `WifiLock`. A foreground service keeps the CPU scheduled but
+says nothing about the Wi-Fi chip, and fog updates are bursty enough to look
+idle to power management.
+
+`POST_NOTIFICATIONS` is requested but not required. Denied, the service still
+runs and the map stays live; the DM just loses the status line and the Stop
+button.
+
 ## Fog
 
 The mask is a bitmap, not a stroke list. Replaying strokes would make drawing

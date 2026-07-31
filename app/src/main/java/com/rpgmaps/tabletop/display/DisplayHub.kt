@@ -66,6 +66,16 @@ class DisplayHub(private val scope: CoroutineScope) {
 
     // --- current player-visible state ------------------------------------
 
+    /**
+     * Whether the players currently have a map in front of them.
+     *
+     * Exposed so the foreground service knows when it has a reason to exist:
+     * without one, Android freezes this process shortly after the DM switches
+     * to another app, and the TV stops updating mid-session.
+     */
+    private val _presenting = MutableStateFlow(false)
+    val presenting: StateFlow<Boolean> = _presenting.asStateFlow()
+
     private var announced: MapAnnounced? = null
     private var imageBytes: ByteArray? = null
     private var imageMime: String = "image/jpeg"
@@ -170,6 +180,7 @@ class DisplayHub(private val scope: CoroutineScope) {
                 this@DisplayHub.fogSeq = fogSeq
                 fogSnapshot = fogSnapshotProvider
             }
+            _presenting.value = true
             _sinks.value.forEach { pushFullState(it) }
         }
     }
@@ -221,6 +232,7 @@ class DisplayHub(private val scope: CoroutineScope) {
                 pendingViewport = null
                 sentViewport = null
             }
+            _presenting.value = false
             broadcast(BlankMessage(true, "No map"))
         }
     }
