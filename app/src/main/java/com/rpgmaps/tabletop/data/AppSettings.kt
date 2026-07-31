@@ -34,6 +34,12 @@ class AppSettings(private val context: Context) {
          * schema migration on a library people already have maps in.
          */
         val rotationQuarters: Int = 0,
+        /**
+         * Quarter-turns applied to the map artwork itself, on both screens.
+         * Separate from [rotationQuarters]: that one says how the TV is
+         * standing, this one says which way the map should face on it.
+         */
+        val mapRotationQuarters: Int = 0,
     )
 
     val flow: Flow<Snapshot> = context.settingsStore.data.map { p ->
@@ -45,6 +51,7 @@ class AppSettings(private val context: Context) {
             blankText = p[KEY_BLANK_TEXT] ?: "",
             serverPort = p[KEY_SERVER_PORT] ?: DEFAULT_PORT,
             rotationQuarters = (p[KEY_ROTATION] ?: 0).mod(4),
+            mapRotationQuarters = (p[KEY_MAP_ROTATION] ?: 0).mod(4),
         )
     }
 
@@ -55,6 +62,7 @@ class AppSettings(private val context: Context) {
     suspend fun setBlankText(value: String) = put(KEY_BLANK_TEXT, value)
     suspend fun setServerPort(value: Int) = put(KEY_SERVER_PORT, value)
     suspend fun setRotationQuarters(value: Int) = put(KEY_ROTATION, value.mod(4))
+    suspend fun setMapRotationQuarters(value: Int) = put(KEY_MAP_ROTATION, value.mod(4))
 
     private suspend fun <T> put(key: Preferences.Key<T>, value: T) {
         context.settingsStore.edit { it[key] = value }
@@ -71,5 +79,6 @@ class AppSettings(private val context: Context) {
         private val KEY_BLANK_TEXT = stringPreferencesKey("blank_text")
         private val KEY_SERVER_PORT = intPreferencesKey("server_port")
         private val KEY_ROTATION = intPreferencesKey("rotation_quarters")
+        private val KEY_MAP_ROTATION = intPreferencesKey("map_rotation_quarters")
     }
 }

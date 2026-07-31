@@ -57,30 +57,43 @@ compute the `halfH` that renders one battle square at one real inch.
 ## Rotation
 
 A TV lying flat on a table has no natural "up", so which edge the map reads
-from depends on where people are sitting. `RotationMessage` carries quarter
-turns.
+from depends on where people are sitting. There are **two** quarter-turn
+values, because there are two different questions.
 
-**It applies to the player view only.** The DM's canvas always draws upright.
-The first version turned both together, reasoning that the two screens should
-agree -- but they must not. The tablet is in your hands and you orient it by
-turning it; the TV lies flat facing the players, often at ninety degrees to
-you. Coupled, fixing the TV always broke the tablet. Fog lives in map
-coordinates, so the two views can differ freely.
+`tvRotationQuarters` — *how the TV is standing.* This applies to the player
+view only; the DM's canvas ignores it. The first version turned both together,
+reasoning that the two screens should agree — but they must not. The tablet is
+in your hands and you orient it by turning it; the TV lies flat facing the
+players, often at ninety degrees to you. Coupled, fixing the TV always broke
+the tablet.
 
-The rule the receiver derives from: **`halfH` governs whichever of *its* screen
-axes is vertical after the rotation.** At 0 and 180 degrees that is its height;
-at 90 and 270 its width. That is also why turning the picture is what makes a
-landscape signal fill a TV stood on its end. Two places implement it and must
-agree: the receiver's `framing` in `draw()`, and `scaleToLife`, which otherwise
-sizes battle squares against the wrong edge.
+`mapRotationQuarters` — *which way the map artwork faces.* That belongs to the
+map rather than to either screen, so it turns **both** together, and the
+tablet stays an honest preview of the TV.
 
-`rotateOutput` deliberately does not touch the viewport. The DM's canvas is not
-rotating, so its framing must not move.
+The receiver only ever needs the sum, so the wire format still carries a single
+`RotationMessage`: the sender composes `playerTotalQuarters =
+(map + tv) mod 4`. Fog lives in map coordinates, so none of this touches the
+mask.
 
-Rotation is a global preference rather than a per-map column. It models where
-the TV sits, which does not change between maps, and keeping it out of the
-database avoided a schema migration on libraries that already have maps in
-them.
+The rule both ends derive from: **`halfH` governs whichever screen axis is
+vertical after the rotation.** At 0 and 180 degrees that is the height; at 90
+and 270 the width. That is also why turning the picture is what makes a
+landscape signal fill a TV stood on its end. Three places implement it and must
+agree: the receiver's `framing` in `draw()` and `scaleToLife`, both keyed on
+the *total*, and the DM canvas's `framingExtent`, keyed on the *map* turn
+alone.
+
+The two rotate functions differ in one telling way. `rotateTv` deliberately
+does not touch the viewport — this canvas is not rotating, so its framing must
+not move. `rotateMap` must, because a quarter turn swaps which canvas axis
+`halfH` is measured against; it rescales `halfH` by
+`extentAfter / extentBefore` so the on-screen zoom is unchanged by the turn.
+
+Both are global preferences rather than per-map columns. They model where the
+TV sits and how the table is laid out, which does not change between maps, and
+keeping them out of the database avoided a schema migration on libraries that
+already have maps in them.
 
 ## Display sinks
 
@@ -123,6 +136,22 @@ Softness is a blur in both cases, but from different bases: `radius * softness`
 for a brush, and a capped fraction of the shorter side for a shape, which has
 no radius. `SHAPE_SOFTNESS_FACTOR` and its neighbours live in the protocol file
 precisely because `applyFogOp` in the receiver has to compute the same number.
+
+**The receiver blurs with `shadowBlur`, not `ctx.filter`.** Android has
+`BlurMaskFilter`; the obvious canvas equivalent is
+`ctx.filter = 'blur(Npx)'`, and that is what the receiver used to do. Safari
+does not implement `CanvasRenderingContext2D.filter` — it accepts the
+assignment and silently ignores it — so on an Apple TV or an iPad browser every
+soft edge came out hard while the tablet showed it correctly. The replacement
+draws the shape *off-screen* with a shadow offset back into view: the shadow is
+the blurred copy, and it is the only thing that lands in the visible region.
+`shadowBlur` is roughly twice the standard deviation of `filter: blur()`, hence
+the `blur * 2`. This costs one scratch canvas and works everywhere.
+
+Chromium *does* support `ctx.filter`, which is why the whole browser test suite
+stayed green while the real target was broken. `shapes.js` now runs a second
+time under `NO_CANVAS_FILTER=1`, which stubs the property out to behave the way
+Safari does.
 
 Strokes are **batched, not sent per touch event**. `FogEditor` buffers points
 and flushes every 40 ms; the flush produces one `FogOp` that is both drawn

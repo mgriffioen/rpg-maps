@@ -359,26 +359,24 @@ private fun MapControlBar(viewModel: MapViewModel) {
                 }
             }
 
-            // Row two: which way the table is facing, and the bulk fog actions.
+            // Row two: which way the table is facing, which way the map faces
+            // on it, and the bulk fog actions.
             ControlRow {
-                BarItem {
-                    IconButton(onClick = { viewModel.rotateOutput(-1) }) {
-                        Icon(Icons.Default.RotateLeft, contentDescription = "Rotate TV view anticlockwise")
-                    }
-                }
-                // Labelled TV because it turns the players' screen only --
-                // this one stays upright.
-                BarItem {
-                    Text(
-                        "TV ${viewModel.playerRotationQuarters * 90}\u00B0",
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                }
-                BarItem {
-                    IconButton(onClick = { viewModel.rotateOutput(1) }) {
-                        Icon(Icons.Default.RotateRight, contentDescription = "Rotate TV view clockwise")
-                    }
-                }
+                // TV: turns the players' screen only, so this canvas is
+                // unaffected. For a TV stood on its end, or read from a
+                // different side of the table than you sit on.
+                RotationGroup(
+                    label = "TV",
+                    quarters = viewModel.tvRotationQuarters,
+                    onRotate = viewModel::rotateTv,
+                )
+                // Map: turns the artwork on both screens at once, so what you
+                // see stays a preview of what they see.
+                RotationGroup(
+                    label = "Map",
+                    quarters = viewModel.mapRotationQuarters,
+                    onRotate = viewModel::rotateMap,
+                )
                 BarItem { OutlinedButton(onClick = viewModel::revealAll) { Text("Reveal all") } }
                 BarItem { OutlinedButton(onClick = viewModel::hideAll) { Text("Hide all") } }
             }
@@ -406,6 +404,32 @@ private fun ControlRow(content: @Composable () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         content()
+    }
+}
+
+/**
+ * An anticlockwise button, the current angle, and a clockwise button.
+ *
+ * A Row rather than three loose [BarItem]s so that when the control bar wraps
+ * in portrait the trio moves as one -- a stray arrow on the line below its own
+ * label would be read as belonging to the wrong rotation.
+ */
+@Composable
+private fun RotationGroup(label: String, quarters: Int, onRotate: (Int) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        BarItem {
+            IconButton(onClick = { onRotate(-1) }) {
+                Icon(Icons.Default.RotateLeft, contentDescription = "Rotate $label anticlockwise")
+            }
+        }
+        BarItem {
+            Text("$label ${quarters * 90}°", style = MaterialTheme.typography.labelLarge)
+        }
+        BarItem {
+            IconButton(onClick = { onRotate(1) }) {
+                Icon(Icons.Default.RotateRight, contentDescription = "Rotate $label clockwise")
+            }
+        }
     }
 }
 

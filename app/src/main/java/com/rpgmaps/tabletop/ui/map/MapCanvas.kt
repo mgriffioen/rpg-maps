@@ -52,10 +52,10 @@ fun MapCanvas(
     val rawTvAspect = statuses.firstOrNull { it.receiverW > 0 && it.receiverH > 0 }
         ?.let { it.receiverW.toFloat() / it.receiverH.toFloat() }
         ?: (16f / 9f)
-    // The outline shows the region the TV covers, so it follows the TV's
-    // rotation even though this canvas does not.
+    // The outline shows the region the TV covers, so it follows the TV's total
+    // turn -- which includes the map turn this canvas shares.
     val tvAspect =
-        if (viewModel.playerRotationQuarters % 2 == 0) rawTvAspect else 1f / rawTvAspect
+        if (viewModel.playerTotalQuarters % 2 == 0) rawTvAspect else 1f / rawTvAspect
 
     Box(
         modifier = modifier
@@ -73,12 +73,17 @@ fun MapCanvas(
             val image = mapImage ?: return@Canvas
             val view = viewModel.view
 
-            // This canvas always draws upright; only the TV rotates. You turn
-            // the tablet by turning the tablet.
-            val scale = size.height / (2f * view.halfH.coerceAtLeast(1f))
+            // This canvas follows the map turn but not the TV turn: which way
+            // the artwork faces is shared, how the TV stands is not.
+            val quarters = viewModel.mapRotationQuarters
+            val framing = if (quarters % 2 == 0) size.height else size.width
+            val scale = framing / (2f * view.halfH.coerceAtLeast(1f))
 
+            // Reads bottom-up: map centre to the origin, scale, turn, then out
+            // to the middle of the canvas.
             withTransform({
                 translate(size.width / 2f, size.height / 2f)
+                rotate(degrees = quarters * 90f, pivot = Offset.Zero)
                 scale(scale, scale, pivot = Offset.Zero)
                 translate(-view.cx, -view.cy)
             }) {

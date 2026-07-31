@@ -24,9 +24,11 @@ middle of the table as the battle map.
 - **Scale to life.** Tell the app how big a battle square is and how big the TV
   is, and it renders one square at one real inch so 28 mm miniatures fit their
   squares.
-- **Rotate the TV.** Turn the players' view in quarter steps without moving
-  your own, for a TV lying flat that people read from a different side than you
-  do -- or one stood on its end. Remembered between sessions.
+- **Rotate, two ways.** *TV* turns the players' view in quarter steps without
+  moving your own, for a TV lying flat that people read from a different side
+  than you do -- or one stood on its end. *Map* turns the artwork itself, on
+  both screens at once, so your tablet stays a preview of what the table sees.
+  Both are remembered between sessions.
 - **Curtain.** Hide the TV during a break without losing any state.
 
 ## Getting it running

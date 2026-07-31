@@ -149,32 +149,56 @@ class MapViewModel(
         private set
 
     /**
-     * Quarter-turns clockwise applied to the **player view only**. The DM's
-     * canvas always draws upright.
+     * Two independent quarter-turns, because they answer different questions.
      *
-     * These were coupled at first, on the theory that the two screens should
-     * agree. In practice they must not: the tablet is in your hands and you
-     * orient it by turning it, while the TV lies flat on the table facing the
-     * players. Turning both together meant fixing the TV always broke the
-     * tablet. Fog lives in map coordinates, so the two can differ freely.
+     * [tvRotationQuarters] is how the TV is standing. Turning it makes a
+     * landscape signal fill a screen stood on its end. It moves the player view
+     * only -- the tablet is in your hands and you orient that by turning it.
+     *
+     * [mapRotationQuarters] is which way the map artwork should face. That
+     * belongs to the map rather than to either screen, so it turns **both**
+     * together.
+     *
+     * The receiver only ever needs the sum, so the wire protocol still carries
+     * a single value: see [playerTotalQuarters].
      */
-    var playerRotationQuarters by mutableStateOf(0)
+    var tvRotationQuarters by mutableStateOf(0)
         private set
 
+    var mapRotationQuarters by mutableStateOf(0)
+        private set
+
+    /** What the player view draws at: both turns composed. */
+    val playerTotalQuarters: Int
+        get() = (mapRotationQuarters + tvRotationQuarters).mod(4)
+
     /**
-     * Turns the player view by [delta] quarter turns. Remembered across maps
-     * and sessions, because it describes how the TV is sitting on the table.
-     *
-     * Deliberately leaves the viewport alone: this canvas is not rotating, so
-     * its framing must not move. The receiver re-frames itself -- halfH is
-     * measured against whichever of its own axes is vertical after the turn --
-     * which is exactly the point. A landscape signal on a TV stood on its end
-     * only fills the screen once the picture is turned to match.
+     * Turns the TV. Deliberately leaves the viewport alone: this canvas is not
+     * rotating, so its framing must not move. The receiver re-frames itself
+     * around whichever of its own axes is vertical after the turn, which is
+     * precisely what fills a screen standing on its end.
      */
-    fun rotateOutput(delta: Int) {
-        playerRotationQuarters = (playerRotationQuarters + delta).mod(4)
-        app.displayHub.setRotation(RotationMessage(playerRotationQuarters))
-        viewModelScope.launch { app.settings.setRotationQuarters(playerRotationQuarters) }
+    fun rotateTv(delta: Int) {
+        tvRotationQuarters = (tvRotationQuarters + delta).mod(4)
+        app.displayHub.setRotation(RotationMessage(playerTotalQuarters))
+        viewModelScope.launch { app.settings.setRotationQuarters(tvRotationQuarters) }
+    }
+
+    /**
+     * Turns the map on both screens. Unlike [rotateTv] this one *does* move
+     * this canvas, so the framing has to be rescaled: a quarter turn swaps
+     * which screen axis halfH is measured against, and leaving it alone would
+     * silently change the zoom.
+     */
+    fun rotateMap(delta: Int) {
+        val extentBefore = framingExtent()
+        mapRotationQuarters = (mapRotationQuarters + delta).mod(4)
+        val extentAfter = framingExtent()
+        if (extentBefore > 0f && extentAfter > 0f) {
+            applyView(view.copy(halfH = view.halfH * (extentAfter / extentBefore)))
+        }
+        app.displayHub.setRotation(RotationMessage(playerTotalQuarters))
+        viewModelScope.launch { app.settings.setMapRotationQuarters(mapRotationQuarters) }
     }
 
     // --- calibration ------------------------------------------------------
@@ -272,7 +296,8 @@ class MapViewModel(
             fogImage = mask.bitmap.asImageBitmap()
 
             gridEnabled = entity.gridEnabled
-            playerRotationQuarters = settings.rotationQuarters
+            tvRotationQuarters = settings.rotationQuarters
+            mapRotationQuarters = settings.mapRotationQuarters
             view = fitViewFor(entity, dmAspect())
 
             app.repository.markOpened(mapId)
@@ -293,7 +318,7 @@ class MapViewModel(
 
         // Seed the hub with this map's framing first: presentMap pushes full
         // state asynchronously and will include whatever viewport is set.
-        app.displayHub.setRotation(RotationMessage(playerRotationQuarters))
+        app.displayHub.setRotation(RotationMessage(playerTotalQuarters))
         pushGrid(entity)
         pushViewport(force = true)
 
@@ -328,25 +353,48 @@ class MapViewModel(
         if (first) map.value?.let { view = fitViewFor(it, dmAspect()) }
     }
 
-    /** This canvas draws upright, so its aspect needs no rotation term. */
+    /**
+     * The screen axis that [ViewState.halfH] governs on *this* canvas. The map
+     * turn rotates this view, so under a quarter turn the map's vertical runs
+     * across the screen and the framing is set by the canvas width.
+     */
+    private fun framingExtent(): Float =
+        if (mapRotationQuarters % 2 == 0) canvasH else canvasW
+
+    /** This canvas's aspect as the map sees it, i.e. after the map turn. */
     private fun dmAspect(): Float {
-        val aspect = canvasW / canvasH
+        val aspect =
+            if (mapRotationQuarters % 2 == 0) canvasW / canvasH else canvasH / canvasW
         return if (aspect.isFinite() && aspect > 0f) aspect else 16f / 9f
     }
 
     /** Screen pixels per map pixel at the current zoom. */
-    fun scale(): Float = canvasH / (2f * view.halfH.coerceAtLeast(1f))
+    fun scale(): Float = framingExtent() / (2f * view.halfH.coerceAtLeast(1f))
+
+    /**
+     * Undoes the map turn on a screen-space delta, turning a finger movement
+     * back into a movement across the map. Written as quarter-turn cases
+     * rather than trigonometry so it stays exact.
+     */
+    private fun unrotate(dx: Float, dy: Float): Pair<Float, Float> = when (mapRotationQuarters) {
+        1 -> dy to -dx
+        2 -> -dx to -dy
+        3 -> -dy to dx
+        else -> dx to dy
+    }
 
     fun screenToMap(x: Float, y: Float): Pair<Float, Float> {
         val s = scale()
-        return (view.cx + (x - canvasW / 2f) / s) to (view.cy + (y - canvasH / 2f) / s)
+        val (mx, my) = unrotate((x - canvasW / 2f) / s, (y - canvasH / 2f) / s)
+        return (view.cx + mx) to (view.cy + my)
     }
 
     // --- viewport ---------------------------------------------------------
 
     fun pan(dxScreen: Float, dyScreen: Float) {
         val s = scale()
-        applyView(view.copy(cx = view.cx - dxScreen / s, cy = view.cy - dyScreen / s))
+        val (mdx, mdy) = unrotate(dxScreen / s, dyScreen / s)
+        applyView(view.copy(cx = view.cx - mdx, cy = view.cy - mdy))
     }
 
     /** Pinch zoom about a screen-space focal point, so the map stays put under the fingers. */
@@ -354,14 +402,9 @@ class MapViewModel(
         if (factor <= 0f || !factor.isFinite()) return
         val (mx, my) = screenToMap(focusX, focusY)
         val newHalfH = clampHalfH(view.halfH / factor)
-        val s = canvasH / (2f * newHalfH)
-        applyView(
-            ViewState(
-                cx = mx - (focusX - canvasW / 2f) / s,
-                cy = my - (focusY - canvasH / 2f) / s,
-                halfH = newHalfH,
-            )
-        )
+        val s = framingExtent() / (2f * newHalfH)
+        val (ox, oy) = unrotate((focusX - canvasW / 2f) / s, (focusY - canvasH / 2f) / s)
+        applyView(ViewState(cx = mx - ox, cy = my - oy, halfH = newHalfH))
     }
 
     /**
@@ -443,7 +486,7 @@ class MapViewModel(
         // Under a quarter turn the receiver frames on its width, so that is the
         // extent halfH has to be measured against. The diagonal above is
         // rotation-invariant, so only this line needs to know.
-        val framingPx = if (playerRotationQuarters % 2 == 0) {
+        val framingPx = if (playerTotalQuarters % 2 == 0) {
             status.receiverH.toFloat()
         } else {
             status.receiverW.toFloat()

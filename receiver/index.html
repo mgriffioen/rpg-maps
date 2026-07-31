@@ -131,7 +131,6 @@ function fillFog(hidden) {
   var g = state.fogCtx;
   g.save();
   g.globalCompositeOperation = 'copy';
-  g.filter = 'none';
   if (hidden) {
     g.fillStyle = '#000';
     g.fillRect(0, 0, state.fog.width, state.fog.height);
@@ -146,6 +145,62 @@ var SHAPE_SOFTNESS_FACTOR = 0.15;
 var MIN_BLUR_PX = 0.6;
 var MAX_SHAPE_BLUR_PX = 60;
 
+/*
+ * Scratch canvas for soft edges. Grown as needed and reused, because a brush
+ * stroke flushes about 25 times a second and reallocating that often would
+ * churn memory on a Chromecast.
+ */
+var stampCanvas = null;
+
+/**
+ * Draws `paint` blurred by `blur`, into a scratch canvas covering `bounds`.
+ * Returns {canvas, x, y, w, h} to composite, or null if there is nothing to do.
+ *
+ * Uses shadowBlur rather than ctx.filter. Safari does not honour
+ * CanvasRenderingContext2D.filter, so `filter = 'blur(...)'` silently did
+ * nothing there: the tablet showed a soft edge and the TV showed a hard one,
+ * with no error anywhere. shadowBlur has been supported everywhere for years.
+ *
+ * The trick is that a shadow is drawn offset from its shape, so the crisp
+ * shape is drawn far off the left of the scratch canvas and only its blurred
+ * shadow lands on it.
+ */
+function softStamp(blur, bounds, paint) {
+  // 3 sigma covers the visible extent of a Gaussian.
+  var pad = Math.ceil(blur * 3) + 2;
+  var x = Math.floor(bounds[0] - pad);
+  var y = Math.floor(bounds[1] - pad);
+  var w = Math.ceil(bounds[2] + pad) - x;
+  var h = Math.ceil(bounds[3] + pad) - y;
+  if (w <= 0 || h <= 0) return null;
+
+  if (stampCanvas === null) stampCanvas = document.createElement('canvas');
+  if (stampCanvas.width < w) stampCanvas.width = w;
+  if (stampCanvas.height < h) stampCanvas.height = h;
+
+  var sg = stampCanvas.getContext('2d');
+  sg.setTransform(1, 0, 0, 1, 0, 0);
+  sg.clearRect(0, 0, w, h);
+
+  // Far enough left that the crisp shape cannot clip back into view.
+  var off = stampCanvas.width + w + 64;
+
+  sg.save();
+  sg.shadowColor = '#000';
+  // Canvas shadowBlur is roughly twice the standard deviation that CSS blur()
+  // uses, so double it to land in the same place visually.
+  sg.shadowBlur = blur * 2;
+  sg.shadowOffsetX = off;
+  sg.shadowOffsetY = 0;
+  sg.fillStyle = '#000';
+  sg.strokeStyle = '#000';
+  sg.translate(-x - off, -y);
+  paint(sg);
+  sg.restore();
+
+  return { canvas: stampCanvas, x: x, y: y, w: w, h: h };
+}
+
 /**
  * Applies one fog op. Mirrors FogMask.apply() on the Android side: same
  * coordinate space (fog-mask pixels), same round caps and joins, and the same
@@ -156,49 +211,76 @@ function applyFogOp(op) {
   if (!state.fogCtx || !op || !op.pts) return;
   var g = state.fogCtx;
   var shape = op.shape || 'brush';
+  var i;
 
-  g.save();
-  g.globalCompositeOperation = op.reveal ? 'destination-out' : 'source-over';
-  g.strokeStyle = '#000';
-  g.fillStyle = '#000';
+  var blur = 0;
+  var bounds = null;
+  var paint = null;
 
   if (shape === 'rect' || shape === 'oval') {
-    if (op.pts.length < 4) { g.restore(); return; }
+    if (op.pts.length < 4) return;
     var x0 = Math.min(op.pts[0], op.pts[2]), x1 = Math.max(op.pts[0], op.pts[2]);
     var y0 = Math.min(op.pts[1], op.pts[3]), y1 = Math.max(op.pts[1], op.pts[3]);
     var w = x1 - x0, h = y1 - y0;
-    if (w < 1 || h < 1) { g.restore(); return; }
+    if (w < 1 || h < 1) return;
 
-    var shapeBlur = Math.min(Math.min(w, h) * op.softness * SHAPE_SOFTNESS_FACTOR, MAX_SHAPE_BLUR_PX);
-    if (shapeBlur > 0) g.filter = 'blur(' + Math.max(MIN_BLUR_PX, shapeBlur) + 'px)';
+    blur = Math.min(Math.min(w, h) * op.softness * SHAPE_SOFTNESS_FACTOR, MAX_SHAPE_BLUR_PX);
+    bounds = [x0, y0, x1, y1];
+    paint = function (c) {
+      c.beginPath();
+      if (shape === 'oval') {
+        c.ellipse(x0 + w / 2, y0 + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+      } else {
+        c.rect(x0, y0, w, h);
+      }
+      c.fill();
+    };
+  } else {
+    if (op.pts.length < 2) return;
+    blur = op.radius * op.softness;
 
-    g.beginPath();
-    if (shape === 'oval') {
-      g.ellipse(x0 + w / 2, y0 + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-    } else {
-      g.rect(x0, y0, w, h);
+    var minX = op.pts[0], maxX = op.pts[0], minY = op.pts[1], maxY = op.pts[1];
+    for (i = 2; i + 1 < op.pts.length; i += 2) {
+      if (op.pts[i] < minX) minX = op.pts[i];
+      if (op.pts[i] > maxX) maxX = op.pts[i];
+      if (op.pts[i + 1] < minY) minY = op.pts[i + 1];
+      if (op.pts[i + 1] > maxY) maxY = op.pts[i + 1];
     }
-    g.fill();
-    g.restore();
-    return;
+    var r = Math.max(1, op.radius);
+    bounds = [minX - r, minY - r, maxX + r, maxY + r];
+
+    paint = function (c) {
+      c.lineWidth = op.radius * 2;
+      c.lineCap = 'round';
+      c.lineJoin = 'round';
+      if (op.pts.length === 2) {
+        c.beginPath();
+        c.arc(op.pts[0], op.pts[1], op.radius, 0, Math.PI * 2);
+        c.fill();
+      } else {
+        c.beginPath();
+        c.moveTo(op.pts[0], op.pts[1]);
+        for (var j = 2; j + 1 < op.pts.length; j += 2) c.lineTo(op.pts[j], op.pts[j + 1]);
+        c.stroke();
+      }
+    };
   }
 
-  if (op.pts.length < 2) { g.restore(); return; }
-  g.lineWidth = op.radius * 2;
-  g.lineCap = 'round';
-  g.lineJoin = 'round';
-  var brushBlur = op.radius * op.softness;
-  if (brushBlur > 0) g.filter = 'blur(' + Math.max(MIN_BLUR_PX, brushBlur) + 'px)';
+  g.save();
+  g.globalCompositeOperation = op.reveal ? 'destination-out' : 'source-over';
+  g.fillStyle = '#000';
+  g.strokeStyle = '#000';
 
-  if (op.pts.length === 2) {
-    g.beginPath();
-    g.arc(op.pts[0], op.pts[1], op.radius, 0, Math.PI * 2);
-    g.fill();
+  // Any blur at all gets the soft path, floored at MIN_BLUR_PX -- exactly what
+  // FogMask.blur() on the Android side does, so neither end rounds a barely
+  // soft edge down to a hard one while the other keeps it.
+  if (blur > 0) {
+    var stamp = softStamp(Math.max(MIN_BLUR_PX, blur), bounds, paint);
+    if (stamp !== null) {
+      g.drawImage(stamp.canvas, 0, 0, stamp.w, stamp.h, stamp.x, stamp.y, stamp.w, stamp.h);
+    }
   } else {
-    g.beginPath();
-    g.moveTo(op.pts[0], op.pts[1]);
-    for (var i = 2; i + 1 < op.pts.length; i += 2) g.lineTo(op.pts[i], op.pts[i + 1]);
-    g.stroke();
+    paint(g);
   }
   g.restore();
 }
@@ -210,7 +292,6 @@ function restoreFogFromPng(base64) {
     var g = state.fogCtx;
     g.save();
     g.globalCompositeOperation = 'copy';
-    g.filter = 'none';
     g.drawImage(img, 0, 0, state.fog.width, state.fog.height);
     g.restore();
   };
