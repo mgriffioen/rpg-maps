@@ -117,6 +117,31 @@ the most important thing in the display layer: mid-session a Chromecast *will*
 drop, and recovering without the DM noticing is the difference between a usable
 app and a toy.
 
+## Pings are the one message that is not state
+
+Everything else the hub sends is recorded and replayed to a receiver that
+connects late, because that replay is what makes a Chromecast drop invisible.
+`PingMessage` is deliberately excluded from `pushFullState`: a ping is a
+gesture, and repeating one to a receiver that reconnects five minutes later
+would point at something the table stopped discussing long ago.
+
+It carries only `x, y` in map pixels — **no radius**. Each renderer sizes the
+marker from its *own* viewport (`PING_RADIUS_FRACTION` of the visible map
+height), which is what keeps it legible on a 43" TV while the DM is scouting
+elsewhere at a completely different zoom. A radius in map pixels would be a
+speck across a whole dungeon level and cover a room close up.
+
+The pulse maths is duplicated in `drawPing` (MapCanvas.kt) and `drawPings`
+(receiver/index.html) and the two must agree, so both work from the same
+constants in `DisplayMessage.kt`. It draws *over* the fog: a ping swallowed by
+the mask looks like the tool failed.
+
+`MapTool.PING` also forced a latent bug into the open. Several checks read
+`tool != PAN` as "is editing fog", which was true while `PAN`, `REVEAL` and
+`HIDE` were the only tools — adding a fourth made those checks start a brush
+stroke, and show brush sliders, for a tool with no brush. They now go through
+`MapTool.editsFog`.
+
 ## Staying alive in the background
 
 Nothing in this app ever stopped the LAN server or the Cast session — the hub

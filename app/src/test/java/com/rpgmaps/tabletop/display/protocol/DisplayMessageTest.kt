@@ -24,6 +24,13 @@ class DisplayMessageTest {
     }
 
     @Test
+    fun `a ping is t=ping with bare x and y`() {
+        val json = encode(PingMessage(512.5f, 384.25f))
+        // receiver/index.html reads msg.x and msg.y off this directly.
+        assertEquals("""{"t":"ping","x":512.5,"y":384.25}""", json)
+    }
+
+    @Test
     fun `every message type round trips`() {
         val messages = listOf(
             MapAnnounced("id", "Cragmaw Hideout", 2048, 1536, 1024, 768, 3),
@@ -39,6 +46,7 @@ class DisplayMessageTest {
             FogFillMessage(9, fogged = true),
             GridMessage(true, 64f, 3f, 5f),
             RotationMessage(3),
+            PingMessage(512.5f, 384.25f),
             BlankMessage(true, "Back in ten"),
             ReceiverHello(1920, 1080, "Chromecast"),
             ResyncRequest(4),

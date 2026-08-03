@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.CropSquare
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.RotateLeft
 import androidx.compose.material.icons.filled.RotateRight
@@ -315,6 +316,13 @@ private fun MapControlBar(viewModel: MapViewModel) {
                         viewModel.tool = MapTool.HIDE
                     }
                 }
+                // Grouped with the fog tools because it is the other thing a
+                // finger does to the map, even though it changes nothing.
+                BarItem {
+                    ToolChip("Ping", Icons.Default.MyLocation, viewModel.tool == MapTool.PING) {
+                        viewModel.tool = MapTool.PING
+                    }
+                }
                 BarItem {
                     IconButton(onClick = viewModel::undo, enabled = viewModel.canUndo) {
                         Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
@@ -381,7 +389,8 @@ private fun MapControlBar(viewModel: MapViewModel) {
                 BarItem { OutlinedButton(onClick = viewModel::hideAll) { Text("Hide all") } }
             }
 
-            if (viewModel.tool != MapTool.PAN) {
+            // editsFog, not `!= PAN`: ping has no brush to size or soften.
+            if (viewModel.tool.editsFog) {
                 BrushControls(viewModel)
             }
         }

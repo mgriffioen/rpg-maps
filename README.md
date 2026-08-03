@@ -29,6 +29,8 @@ middle of the table as the battle map.
   than you do -- or one stood on its end. *Map* turns the artwork itself, on
   both screens at once, so your tablet stays a preview of what the table sees.
   Both are remembered between sessions.
+- **Ping.** Someone asks "where's the door?" — tap the map and a pink marker
+  pulses there on the players' screen for a couple of seconds, over the fog.
 - **Curtain.** Hide the TV during a break without losing any state.
 - **Keeps running when you switch apps.** Look up a rule, roll dice, answer a
   message — the players' screen stays live. A notification shows the address

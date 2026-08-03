@@ -1,5 +1,6 @@
 package com.rpgmaps.tabletop.ui.map
 
+import android.os.SystemClock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -18,6 +19,8 @@ import com.rpgmaps.tabletop.display.protocol.FogOp
 import com.rpgmaps.tabletop.display.protocol.FogShape
 import com.rpgmaps.tabletop.display.protocol.GridMessage
 import com.rpgmaps.tabletop.display.protocol.MapAnnounced
+import com.rpgmaps.tabletop.display.protocol.PING_DURATION_MS
+import com.rpgmaps.tabletop.display.protocol.PingMessage
 import com.rpgmaps.tabletop.display.protocol.RotationMessage
 import com.rpgmaps.tabletop.display.protocol.ViewportMessage
 import com.rpgmaps.tabletop.fog.FogEditor
@@ -39,7 +42,19 @@ import kotlin.math.abs
 import kotlin.math.hypot
 
 /** What a one-finger drag on the map does. Two fingers always pan and zoom. */
-enum class MapTool { PAN, REVEAL, HIDE }
+enum class MapTool { PAN, REVEAL, HIDE, PING }
+
+/** True for the tools that edit the fog mask, as opposed to moving or marking. */
+val MapTool.editsFog: Boolean
+    get() = this == MapTool.REVEAL || this == MapTool.HIDE
+
+/**
+ * A ping still animating on the DM's canvas.
+ *
+ * Held here as well as sent over the wire so the tablet shows the same marker
+ * at the same moment; nothing comes back from the receiver to drive it.
+ */
+data class ActivePing(val x: Float, val y: Float, val startedAt: Long)
 
 /** A view of the map, in map pixels. Matches the wire viewport exactly. */
 data class ViewState(val cx: Float, val cy: Float, val halfH: Float)
@@ -199,6 +214,52 @@ class MapViewModel(
         }
         app.displayHub.setRotation(RotationMessage(playerTotalQuarters))
         viewModelScope.launch { app.settings.setMapRotationQuarters(mapRotationQuarters) }
+    }
+
+    // --- pings ------------------------------------------------------------
+
+    var activePings by mutableStateOf<List<ActivePing>>(emptyList())
+        private set
+
+    /**
+     * Bumped every animation frame while a ping is alive. The canvas reads it
+     * for the same reason it reads [fogVersion]: to be told to draw again when
+     * nothing it draws *from* has changed identity.
+     */
+    var pingFrame by mutableStateOf(0)
+        private set
+
+    private var pingJob: Job? = null
+
+    /**
+     * Marks a spot for the players, at a screen position on this canvas.
+     *
+     * Works with the TV frozen and while a shape is half-drawn, because it
+     * touches neither: it is a one-shot message, not a change to what is being
+     * displayed.
+     */
+    fun ping(screenX: Float, screenY: Float) {
+        val entity = map.value ?: return
+        val (mx, my) = screenToMap(screenX, screenY)
+        // A tap past the edge of the artwork is a miss, not a ping in the void.
+        if (mx < 0f || my < 0f || mx > entity.imageW || my > entity.imageH) return
+
+        activePings = activePings + ActivePing(mx, my, SystemClock.elapsedRealtime())
+        app.displayHub.sendPing(PingMessage(mx, my))
+        runPingAnimation()
+    }
+
+    /** Drives the canvas while pings are alive, and stops when the last expires. */
+    private fun runPingAnimation() {
+        if (pingJob?.isActive == true) return
+        pingJob = viewModelScope.launch {
+            while (activePings.isNotEmpty()) {
+                val now = SystemClock.elapsedRealtime()
+                activePings = activePings.filter { now - it.startedAt < PING_DURATION_MS }
+                pingFrame++
+                delay(PING_FRAME_MS)
+            }
+        }
     }
 
     // --- calibration ------------------------------------------------------
@@ -772,6 +833,9 @@ class MapViewModel(
         private const val STROKE_FLUSH_MS = 40L
 
         private const val FOG_SAVE_DEBOUNCE_MS = 1_200L
+
+        /** ~60 Hz, so the ping animation is smooth under the finger. */
+        private const val PING_FRAME_MS = 16L
 
         fun factory(mapId: String): ViewModelProvider.Factory = viewModelFactory {
             initializer { MapViewModel(application(this), mapId) }

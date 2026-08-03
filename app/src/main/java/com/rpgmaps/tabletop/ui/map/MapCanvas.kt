@@ -1,5 +1,6 @@
 package com.rpgmaps.tabletop.ui.map
 
+import android.os.SystemClock
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -26,6 +27,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
 import com.rpgmaps.tabletop.display.protocol.FogShape
+import com.rpgmaps.tabletop.display.protocol.PING_DURATION_MS
+import com.rpgmaps.tabletop.display.protocol.PING_FADE_TAIL
+import com.rpgmaps.tabletop.display.protocol.PING_PULSES
+import com.rpgmaps.tabletop.display.protocol.PING_RADIUS_FRACTION
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 
@@ -68,6 +73,11 @@ fun MapCanvas(
             // is mutated in place, so nothing else would signal a change.
             @Suppress("UNUSED_EXPRESSION")
             viewModel.fogVersion
+
+            // Likewise for the ping animation: the pings themselves do not
+            // change, only how long ago they started.
+            @Suppress("UNUSED_EXPRESSION")
+            viewModel.pingFrame
 
             val map = entity ?: return@Canvas
             val image = mapImage ?: return@Canvas
@@ -139,6 +149,14 @@ fun MapCanvas(
                     reveal = viewModel.tool == MapTool.REVEAL,
                     strokeWidth = 2.5f / scale,
                 )
+
+                // Over the fog rather than under it: a ping is the DM pointing
+                // at somewhere, and one swallowed by the mask would just look
+                // like the tool had failed.
+                if (viewModel.activePings.isNotEmpty()) {
+                    val now = SystemClock.elapsedRealtime()
+                    viewModel.activePings.forEach { drawPing(it, now, view.halfH) }
+                }
 
                 if (viewModel.calibrating) {
                     drawMeasureLine(
@@ -225,6 +243,46 @@ private fun DrawScope.drawShapePreview(
     }
 }
 
+/**
+ * A pulsing marker, drawn in map space.
+ *
+ * The maths here is duplicated by `drawPings` in receiver/index.html and the
+ * two must agree, or the DM and the table watch subtly different animations of
+ * the same gesture. Both work from the constants in DisplayMessage.kt.
+ *
+ * Sized from [halfH] -- the caller's own visible extent -- rather than in map
+ * pixels, so it reads the same whatever the zoom, and stays legible on the TV
+ * while the DM is scouting somewhere else at a completely different scale.
+ */
+private fun DrawScope.drawPing(ping: ActivePing, now: Long, halfH: Float) {
+    val elapsed = (now - ping.startedAt).toFloat()
+    val life = elapsed / PING_DURATION_MS
+    if (life >= 1f) return
+
+    val fade = ((1f - life) / PING_FADE_TAIL).coerceAtMost(1f)
+    val base = PING_RADIUS_FRACTION * 2f * halfH
+    val centre = Offset(ping.x, ping.y)
+
+    // Where this pulse is in its own cycle, so the ring restarts PING_PULSES
+    // times over the lifetime instead of expanding once, slowly.
+    val pulseMs = PING_DURATION_MS.toFloat() / PING_PULSES
+    val phase = (elapsed % pulseMs) / pulseMs
+
+    drawCircle(
+        color = PING_COLOR,
+        radius = base * (0.5f + 1.6f * phase),
+        center = centre,
+        alpha = ((1f - phase) * 0.85f * fade).coerceIn(0f, 1f),
+        style = Stroke(width = base * 0.16f),
+    )
+    drawCircle(
+        color = PING_COLOR,
+        radius = base * 0.42f,
+        center = centre,
+        alpha = (0.9f * fade).coerceIn(0f, 1f),
+    )
+}
+
 /** The calibration ruler the DM drags across a known square. */
 private fun DrawScope.drawMeasureLine(
     start: Pair<Float, Float>?,
@@ -259,15 +317,23 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.handleMa
         var shaping = false
         var usedMultiTouch = false
 
+        // How far the finger travelled, to tell a ping tap from a pan drag.
+        var travel = 0f
+
+        // Only REVEAL and HIDE edit the mask. PING has to be excluded
+        // explicitly: written as `tool != PAN` these branches would start a
+        // brush stroke the moment the DM tried to mark a spot.
+        val editsFog = viewModel.tool.editsFog
+
         if (viewModel.calibrating) {
             measuring = true
             viewModel.beginMeasure(down.position.x, down.position.y)
             down.consume()
-        } else if (viewModel.tool != MapTool.PAN && viewModel.fogShape != FogShape.BRUSH) {
+        } else if (editsFog && viewModel.fogShape != FogShape.BRUSH) {
             shaping = true
             viewModel.beginShape(down.position.x, down.position.y)
             down.consume()
-        } else if (viewModel.tool != MapTool.PAN) {
+        } else if (editsFog) {
             painting = true
             viewModel.startStroke(down.position.x, down.position.y)
             down.consume()
@@ -316,11 +382,12 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.handleMa
                         viewModel.extendStroke(change.position.x, change.position.y)
                         change.consume()
                     }
-                    // In pan mode a single finger always pans. In a brush mode
-                    // it must not resume panning after a pinch -- lifting one
-                    // finger would otherwise drag the map unexpectedly.
-                    viewModel.tool == MapTool.PAN || !usedMultiTouch -> {
+                    // Outside a fog tool a single finger always pans. Within
+                    // one it must not resume panning after a pinch -- lifting
+                    // one finger would otherwise drag the map unexpectedly.
+                    !editsFog || !usedMultiTouch -> {
                         val delta = change.positionChange()
+                        travel += delta.getDistance()
                         viewModel.pan(delta.x, delta.y)
                         change.consume()
                     }
@@ -330,8 +397,22 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.handleMa
 
         if (painting) viewModel.endStroke()
         if (shaping) viewModel.endShape()
+
+        // A ping is a tap, so the same gesture still pans when dragged. Using
+        // touch slop rather than a zero threshold matters on a tablet held in
+        // one hand: a perfectly still finger is not a thing.
+        if (viewModel.tool == MapTool.PING &&
+            !usedMultiTouch &&
+            !measuring &&
+            travel <= viewConfiguration.touchSlop
+        ) {
+            viewModel.ping(down.position.x, down.position.y)
+        }
     }
 }
+
+/** Warm pink: reads as a deliberate mark against dungeon greys and greens. */
+private val PING_COLOR = Color(0xFFFF2D6F)
 
 /** Enough to read the terrain through, dark enough to read as "hidden". */
 private const val DM_FOG_ALPHA = 0.72f

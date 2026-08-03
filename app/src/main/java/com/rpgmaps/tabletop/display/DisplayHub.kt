@@ -10,6 +10,7 @@ import com.rpgmaps.tabletop.display.protocol.FogOpsMessage
 import com.rpgmaps.tabletop.display.protocol.FogResetMessage
 import com.rpgmaps.tabletop.display.protocol.GridMessage
 import com.rpgmaps.tabletop.display.protocol.MapAnnounced
+import com.rpgmaps.tabletop.display.protocol.PingMessage
 import com.rpgmaps.tabletop.display.protocol.ResyncRequest
 import com.rpgmaps.tabletop.display.protocol.RotationMessage
 import com.rpgmaps.tabletop.display.protocol.ViewportMessage
@@ -205,6 +206,18 @@ class DisplayHub(private val scope: CoroutineScope) {
     fun sendFogSnapshot(seq: Long, png: ByteArray) {
         fogSeq = seq
         broadcast(FogResetMessage(seq, Base64.encodeToString(png, Base64.NO_WRAP)))
+    }
+
+    /**
+     * Marks a spot on the players' screen.
+     *
+     * The one message that is *not* recorded for replay. A ping is a gesture,
+     * and [pushFullState] deliberately knows nothing about it: repeating one to
+     * a receiver that reconnects later would point at something the table
+     * stopped discussing minutes ago.
+     */
+    fun sendPing(spec: PingMessage) {
+        broadcast(spec)
     }
 
     fun setGrid(spec: GridMessage) {

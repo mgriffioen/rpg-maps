@@ -190,6 +190,49 @@ data class RotationMessage(
     val quarters: Int,
 ) : DisplayMessage
 
+/**
+ * "There." Marks a spot on the players' screen for a couple of seconds.
+ *
+ * In map pixels, like the viewport, so it lands in the same place on a screen
+ * framed differently -- the DM may be zoomed somewhere else entirely, or the
+ * TV frozen.
+ *
+ * Carries no size. Each renderer works that out from its *own* viewport (see
+ * [PING_RADIUS_FRACTION]) so the marker is equally legible on a 43" TV and a
+ * tablet preview, at whatever zoom each happens to be at.
+ *
+ * Unlike every other message here this one is a **gesture, not state**. It is
+ * deliberately left out of the hub's full-state replay: a ping repeated to a
+ * receiver that reconnects five minutes later would point at something nobody
+ * is talking about any more.
+ */
+@Serializable
+@SerialName("ping")
+data class PingMessage(
+    val x: Float,
+    val y: Float,
+) : DisplayMessage
+
+/**
+ * How long a ping lives. The three constants below are mirrored by
+ * `drawPings` in receiver/index.html; both renderers animate from the same
+ * numbers so the DM sees what the table sees.
+ */
+const val PING_DURATION_MS: Long = 2400
+
+/** Expanding rings over that lifetime. */
+const val PING_PULSES: Int = 3
+
+/**
+ * Ping radius as a fraction of the visible map height, rather than a fixed
+ * number of map pixels. A fixed size would be a speck when zoomed out to the
+ * whole dungeon and cover a room when zoomed in.
+ */
+const val PING_RADIUS_FRACTION: Float = 0.045f
+
+/** Final fraction of the lifetime spent fading out. */
+const val PING_FADE_TAIL: Float = 0.25f
+
 /** Hides the map behind a curtain without losing any state. */
 @Serializable
 @SerialName("blank")
