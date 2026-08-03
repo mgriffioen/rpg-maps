@@ -27,10 +27,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
 import com.rpgmaps.tabletop.display.protocol.FogShape
-import com.rpgmaps.tabletop.display.protocol.PING_DURATION_MS
-import com.rpgmaps.tabletop.display.protocol.PING_FADE_TAIL
-import com.rpgmaps.tabletop.display.protocol.PING_PULSES
-import com.rpgmaps.tabletop.display.protocol.PING_RADIUS_FRACTION
+import com.rpgmaps.tabletop.display.protocol.MARK_DURATION_MS
+import com.rpgmaps.tabletop.display.protocol.MARK_FADE_TAIL
+import com.rpgmaps.tabletop.display.protocol.MARK_PULSES
+import com.rpgmaps.tabletop.display.protocol.MARK_RADIUS_FRACTION
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 
@@ -256,16 +256,16 @@ private fun DrawScope.drawShapePreview(
  */
 private fun DrawScope.drawPing(ping: ActivePing, now: Long, halfH: Float) {
     val elapsed = (now - ping.startedAt).toFloat()
-    val life = elapsed / PING_DURATION_MS
+    val life = elapsed / MARK_DURATION_MS
     if (life >= 1f) return
 
-    val fade = ((1f - life) / PING_FADE_TAIL).coerceAtMost(1f)
-    val base = PING_RADIUS_FRACTION * 2f * halfH
+    val fade = ((1f - life) / MARK_FADE_TAIL).coerceAtMost(1f)
+    val base = MARK_RADIUS_FRACTION * 2f * halfH
     val centre = Offset(ping.x, ping.y)
 
-    // Where this pulse is in its own cycle, so the ring restarts PING_PULSES
+    // Where this pulse is in its own cycle, so the ring restarts MARK_PULSES
     // times over the lifetime instead of expanding once, slowly.
-    val pulseMs = PING_DURATION_MS.toFloat() / PING_PULSES
+    val pulseMs = MARK_DURATION_MS.toFloat() / MARK_PULSES
     val phase = (elapsed % pulseMs) / pulseMs
 
     drawCircle(

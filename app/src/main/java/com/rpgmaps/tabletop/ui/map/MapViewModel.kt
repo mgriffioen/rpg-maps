@@ -19,8 +19,8 @@ import com.rpgmaps.tabletop.display.protocol.FogOp
 import com.rpgmaps.tabletop.display.protocol.FogShape
 import com.rpgmaps.tabletop.display.protocol.GridMessage
 import com.rpgmaps.tabletop.display.protocol.MapAnnounced
-import com.rpgmaps.tabletop.display.protocol.PING_DURATION_MS
-import com.rpgmaps.tabletop.display.protocol.PingMessage
+import com.rpgmaps.tabletop.display.protocol.MARK_DURATION_MS
+import com.rpgmaps.tabletop.display.protocol.MarkMessage
 import com.rpgmaps.tabletop.display.protocol.RotationMessage
 import com.rpgmaps.tabletop.display.protocol.ViewportMessage
 import com.rpgmaps.tabletop.fog.FogEditor
@@ -245,7 +245,7 @@ class MapViewModel(
         if (mx < 0f || my < 0f || mx > entity.imageW || my > entity.imageH) return
 
         activePings = activePings + ActivePing(mx, my, SystemClock.elapsedRealtime())
-        app.displayHub.sendPing(PingMessage(mx, my))
+        app.displayHub.sendMark(MarkMessage(mx, my))
         runPingAnimation()
     }
 
@@ -255,7 +255,7 @@ class MapViewModel(
         pingJob = viewModelScope.launch {
             while (activePings.isNotEmpty()) {
                 val now = SystemClock.elapsedRealtime()
-                activePings = activePings.filter { now - it.startedAt < PING_DURATION_MS }
+                activePings = activePings.filter { now - it.startedAt < MARK_DURATION_MS }
                 pingFrame++
                 delay(PING_FRAME_MS)
             }

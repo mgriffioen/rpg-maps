@@ -34,7 +34,15 @@ jobs:
       # Caches the Gradle distribution and dependency downloads between runs.
       - uses: gradle/actions/setup-gradle@v4
 
-      # Unit tests first: a failure here is a real bug, and it is much easier
+      # Cheap structural checks first. Both catch mistakes whose real error
+      # message points somewhere unrelated, so finding them here saves reading
+      # a confusing stack trace later.
+      - name: Structural checks
+        run: |
+          bash tools/check-declaration-clashes.sh
+          bash tools/check-serial-names.sh
+
+      # Unit tests next: a failure here is a real bug, and it is much easier
       # to read than the same problem surfacing as a crash on the tablet.
       #
       # testDebugUnitTest, not test. The plain `test` task runs the release

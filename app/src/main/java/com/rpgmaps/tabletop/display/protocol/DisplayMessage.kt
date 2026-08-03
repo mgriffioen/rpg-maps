@@ -193,12 +193,18 @@ data class RotationMessage(
 /**
  * "There." Marks a spot on the players' screen for a couple of seconds.
  *
+ * Tagged `mark`, not `ping`, even though the DM's button says Ping: `ping` is
+ * already this protocol's WebSocket keepalive (see [Ping]). Two subclasses
+ * claiming one discriminator value stops kotlinx.serialization building the
+ * serializer for the *whole* hierarchy, and the tablet decodes real keepalives
+ * with it -- a heartbeat could have arrived as a marker at (0,0).
+ *
  * In map pixels, like the viewport, so it lands in the same place on a screen
  * framed differently -- the DM may be zoomed somewhere else entirely, or the
  * TV frozen.
  *
  * Carries no size. Each renderer works that out from its *own* viewport (see
- * [PING_RADIUS_FRACTION]) so the marker is equally legible on a 43" TV and a
+ * [MARK_RADIUS_FRACTION]) so the marker is equally legible on a 43" TV and a
  * tablet preview, at whatever zoom each happens to be at.
  *
  * Unlike every other message here this one is a **gesture, not state**. It is
@@ -207,31 +213,31 @@ data class RotationMessage(
  * is talking about any more.
  */
 @Serializable
-@SerialName("ping")
-data class PingMessage(
+@SerialName("mark")
+data class MarkMessage(
     val x: Float,
     val y: Float,
 ) : DisplayMessage
 
 /**
- * How long a ping lives. The three constants below are mirrored by
+ * How long a marker lives. The three constants below are mirrored by
  * `drawPings` in receiver/index.html; both renderers animate from the same
  * numbers so the DM sees what the table sees.
  */
-const val PING_DURATION_MS: Long = 2400
+const val MARK_DURATION_MS: Long = 2400
 
 /** Expanding rings over that lifetime. */
-const val PING_PULSES: Int = 3
+const val MARK_PULSES: Int = 3
 
 /**
- * Ping radius as a fraction of the visible map height, rather than a fixed
+ * Marker radius as a fraction of the visible map height, rather than a fixed
  * number of map pixels. A fixed size would be a speck when zoomed out to the
  * whole dungeon and cover a room when zoomed in.
  */
-const val PING_RADIUS_FRACTION: Float = 0.045f
+const val MARK_RADIUS_FRACTION: Float = 0.045f
 
 /** Final fraction of the lifetime spent fading out. */
-const val PING_FADE_TAIL: Float = 0.25f
+const val MARK_FADE_TAIL: Float = 0.25f
 
 /** Hides the map behind a curtain without losing any state. */
 @Serializable
@@ -273,6 +279,9 @@ data class ResyncRequest(
  *
  * Sending these on a timer and watching for the answer is what turns that into
  * an automatic reconnect.
+ *
+ * Unrelated to the DM's Ping tool, which is [MarkMessage] on the wire for
+ * exactly this reason.
  */
 @Serializable
 @SerialName("ping")

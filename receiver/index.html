@@ -87,7 +87,7 @@ var state = {
   grid: {enabled: false, pxPerSquare: 0, offsetX: 0, offsetY: 0, colorArgb: '#59FFFFFF'},
   blank: {on: false, text: ''},
   rot: 0,             // quarter-turns clockwise, 0..3
-  pings: []           // [{x, y, at}] in map px; transient, never resynced
+  marks: []           // [{x, y, at}] in map px; transient, never resynced
 };
 
 var chunks = {revision: -1, parts: [], have: 0, count: 0, mime: 'image/jpeg'};
@@ -358,9 +358,10 @@ function handle(msg) {
       applyOverlayRotation();
       break;
 
-    case 'ping':
-      // Appended, not replaced: two quick taps should both pulse.
-      state.pings.push({x: msg.x, y: msg.y, at: Date.now()});
+    case 'mark':
+      // 'mark', not 'ping': 'ping' is this protocol's keepalive. Appended
+      // rather than replaced, so two quick taps both pulse.
+      state.marks.push({x: msg.x, y: msg.y, at: Date.now()});
       break;
 
     case 'blank':
@@ -472,15 +473,15 @@ function draw() {
 
   // After the fog, so a ping into an unrevealed room is still visible: the DM
   // is pointing at a place, not revealing it.
-  drawPings(view.halfH);
+  drawMarks(view.halfH);
 }
 
 /* Mirrors the constants of the same name in DisplayMessage.kt. */
-var PING_DURATION_MS = 2400;
-var PING_PULSES = 3;
-var PING_RADIUS_FRACTION = 0.045;
-var PING_FADE_TAIL = 0.25;
-var PING_COLOR = '#FF2D6F';
+var MARK_DURATION_MS = 2400;
+var MARK_PULSES = 3;
+var MARK_RADIUS_FRACTION = 0.045;
+var MARK_FADE_TAIL = 0.25;
+var MARK_COLOR = '#FF2D6F';
 
 /**
  * Pulsing markers, in map space. Must animate identically to drawPing() in
@@ -491,25 +492,25 @@ var PING_COLOR = '#FF2D6F';
  * Expired pings are dropped here rather than on a timer: this runs every frame
  * anyway, and nothing else needs to know they existed.
  */
-function drawPings(halfH) {
-  if (!state.pings.length) return;
+function drawMarks(halfH) {
+  if (!state.marks.length) return;
 
   var now = Date.now();
   var alive = [];
-  var base = PING_RADIUS_FRACTION * 2 * halfH;
-  var pulseMs = PING_DURATION_MS / PING_PULSES;
+  var base = MARK_RADIUS_FRACTION * 2 * halfH;
+  var pulseMs = MARK_DURATION_MS / MARK_PULSES;
 
-  ctx.strokeStyle = PING_COLOR;
-  ctx.fillStyle = PING_COLOR;
+  ctx.strokeStyle = MARK_COLOR;
+  ctx.fillStyle = MARK_COLOR;
 
-  for (var i = 0; i < state.pings.length; i++) {
-    var p = state.pings[i];
+  for (var i = 0; i < state.marks.length; i++) {
+    var p = state.marks[i];
     var elapsed = now - p.at;
-    var life = elapsed / PING_DURATION_MS;
+    var life = elapsed / MARK_DURATION_MS;
     if (life >= 1) continue;
     alive.push(p);
 
-    var fade = Math.min(1, (1 - life) / PING_FADE_TAIL);
+    var fade = Math.min(1, (1 - life) / MARK_FADE_TAIL);
     var phase = (elapsed % pulseMs) / pulseMs;
 
     ctx.globalAlpha = Math.max(0, Math.min(1, (1 - phase) * 0.85 * fade));
@@ -525,7 +526,7 @@ function drawPings(halfH) {
   }
 
   ctx.globalAlpha = 1;
-  state.pings = alive;
+  state.marks = alive;
 }
 
 function frameLoop() {

@@ -125,6 +125,17 @@ connects late, because that replay is what makes a Chromecast drop invisible.
 gesture, and repeating one to a receiver that reconnects five minutes later
 would point at something the table stopped discussing long ago.
 
+On the wire it is tagged **`mark`, not `ping`** — the DM's button says Ping,
+but `ping` was already this protocol's WebSocket keepalive. Two subclasses
+claiming one discriminator is worth calling out because of *how* it fails:
+kotlinx.serialization does not complain at the declaration, it throws while
+building the serializer for the entire sealed hierarchy, so every test that
+encodes anything fails at once with an `IllegalStateException` pointing at
+whichever line called `encode()` first. Nothing points at the duplicate. And
+the tablet decodes real keepalives with that same serializer, so a heartbeat
+could have arrived as a marker at (0,0). `tools/check-serial-names.sh` now
+names the offenders directly, and CI runs it before the tests.
+
 It carries only `x, y` in map pixels — **no radius**. Each renderer sizes the
 marker from its *own* viewport (`PING_RADIUS_FRACTION` of the visible map
 height), which is what keeps it legible on a 43" TV while the DM is scouting

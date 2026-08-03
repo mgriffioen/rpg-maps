@@ -10,7 +10,7 @@ import com.rpgmaps.tabletop.display.protocol.FogOpsMessage
 import com.rpgmaps.tabletop.display.protocol.FogResetMessage
 import com.rpgmaps.tabletop.display.protocol.GridMessage
 import com.rpgmaps.tabletop.display.protocol.MapAnnounced
-import com.rpgmaps.tabletop.display.protocol.PingMessage
+import com.rpgmaps.tabletop.display.protocol.MarkMessage
 import com.rpgmaps.tabletop.display.protocol.ResyncRequest
 import com.rpgmaps.tabletop.display.protocol.RotationMessage
 import com.rpgmaps.tabletop.display.protocol.ViewportMessage
@@ -216,7 +216,7 @@ class DisplayHub(private val scope: CoroutineScope) {
      * a receiver that reconnects later would point at something the table
      * stopped discussing minutes ago.
      */
-    fun sendPing(spec: PingMessage) {
+    fun sendMark(spec: MarkMessage) {
         broadcast(spec)
     }
 

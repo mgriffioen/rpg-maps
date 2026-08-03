@@ -24,10 +24,10 @@ class DisplayMessageTest {
     }
 
     @Test
-    fun `a ping is t=ping with bare x and y`() {
-        val json = encode(PingMessage(512.5f, 384.25f))
+    fun `a ping is tagged mark, since ping is the keepalive`() {
+        val json = encode(MarkMessage(512.5f, 384.25f))
         // receiver/index.html reads msg.x and msg.y off this directly.
-        assertEquals("""{"t":"ping","x":512.5,"y":384.25}""", json)
+        assertEquals("""{"t":"mark","x":512.5,"y":384.25}""", json)
     }
 
     @Test
@@ -46,7 +46,7 @@ class DisplayMessageTest {
             FogFillMessage(9, fogged = true),
             GridMessage(true, 64f, 3f, 5f),
             RotationMessage(3),
-            PingMessage(512.5f, 384.25f),
+            MarkMessage(512.5f, 384.25f),
             BlankMessage(true, "Back in ten"),
             ReceiverHello(1920, 1080, "Chromecast"),
             ResyncRequest(4),
