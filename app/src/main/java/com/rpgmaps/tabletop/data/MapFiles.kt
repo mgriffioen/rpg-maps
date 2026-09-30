@@ -14,6 +14,7 @@ import java.io.File
  *                              by viewports, grid and calibration
  * files/maps/<id>/thumb.jpg    library grid thumbnail
  * files/maps/<id>/fog.png      fog mask, black = hidden
+ * files/maps/<id>/drawings.json  lines, shapes and arrows drawn on the map
  * ```
  */
 class MapFiles(context: Context, val id: String) {
@@ -24,6 +25,7 @@ class MapFiles(context: Context, val id: String) {
     val display: File get() = File(dir, "display.jpg")
     val thumb: File get() = File(dir, "thumb.jpg")
     val fog: File get() = File(dir, "fog.png")
+    val drawings: File get() = File(dir, "drawings.json")
 
     fun ensureDir(): File = dir.apply { mkdirs() }
 

@@ -1,5 +1,8 @@
 package com.rpgmaps.tabletop.ui.map
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -12,19 +15,26 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.automirrored.filled.TrendingFlat
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.CropSquare
+import androidx.compose.material.icons.filled.Draw
+import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.PanoramaFishEye
 import androidx.compose.material.icons.filled.PanTool
+import androidx.compose.material.icons.filled.AutoFixNormal
 import androidx.compose.material.icons.filled.RotateLeft
 import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.Straighten
@@ -62,6 +72,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -324,6 +339,11 @@ private fun MapControlBar(viewModel: MapViewModel) {
                     }
                 }
                 BarItem {
+                    ToolChip("Draw", Icons.Default.Draw, viewModel.tool == MapTool.DRAW) {
+                        viewModel.tool = MapTool.DRAW
+                    }
+                }
+                BarItem {
                     IconButton(onClick = viewModel::undo, enabled = viewModel.canUndo) {
                         Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
                     }
@@ -392,6 +412,9 @@ private fun MapControlBar(viewModel: MapViewModel) {
             // editsFog, not `!= PAN`: ping has no brush to size or soften.
             if (viewModel.tool.editsFog) {
                 BrushControls(viewModel)
+            }
+            if (viewModel.tool == MapTool.DRAW) {
+                DrawControls(viewModel)
             }
         }
     }
@@ -551,6 +574,111 @@ private fun BrushControls(viewModel: MapViewModel) {
         }
     }
 }
+
+/**
+ * What the Draw tool puts down, in which colour and how thick.
+ *
+ * Laid out like [BrushControls] -- a row of shape chips, then the settings
+ * they share -- so the two tools read as one family. Colour and width vanish
+ * for the eraser, which has neither.
+ */
+@Composable
+private fun DrawControls(viewModel: MapViewModel) {
+    val erasing = viewModel.drawTool == DrawTool.ERASER
+
+    Column(
+        Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        ControlRow {
+            DRAW_TOOLS.forEach { (tool, label, icon) ->
+                BarItem {
+                    ShapeChip(label, icon, viewModel.drawTool == tool) {
+                        viewModel.updateDrawTool(tool)
+                    }
+                }
+            }
+            BarItem {
+                OutlinedButton(
+                    onClick = viewModel::clearDrawings,
+                    enabled = viewModel.drawings.isNotEmpty(),
+                ) { Text("Clear drawings") }
+            }
+        }
+
+        if (!erasing) {
+            ControlRow {
+                DRAW_COLORS.forEach { (argb, name) ->
+                    BarItem {
+                        ColorSwatch(
+                            argb = argb,
+                            name = name,
+                            selected = viewModel.drawColor.equals(argb, ignoreCase = true),
+                            onClick = { viewModel.updateDrawColor(argb) },
+                        )
+                    }
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Width", style = MaterialTheme.typography.labelLarge)
+                Slider(
+                    value = viewModel.drawWidth,
+                    onValueChange = viewModel::updateDrawWidth,
+                    valueRange = 3f..40f,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+/** A round colour chip; the chosen one gets a ring in the theme's own colour. */
+@Composable
+private fun ColorSwatch(argb: String, name: String, selected: Boolean, onClick: () -> Unit) {
+    val ring = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+    Box(
+        Modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .border(if (selected) 3.dp else 1.dp, ring, CircleShape)
+            .padding(if (selected) 5.dp else 3.dp)
+            .clip(CircleShape)
+            .background(parseArgb(argb))
+            .clickable(role = Role.RadioButton, onClick = onClick)
+            .semantics {
+                contentDescription = name
+                this.selected = selected
+            },
+    )
+}
+
+private data class DrawToolOption(val tool: DrawTool, val label: String, val icon: ImageVector)
+
+private val DRAW_TOOLS = listOf(
+    DrawToolOption(DrawTool.PEN, "Pen", Icons.Default.Gesture),
+    DrawToolOption(DrawTool.RECT, "Rectangle", Icons.Default.CropSquare),
+    DrawToolOption(DrawTool.OVAL, "Oval", Icons.Default.PanoramaFishEye),
+    DrawToolOption(DrawTool.ARROW, "Arrow", Icons.AutoMirrored.Filled.TrendingFlat),
+    DrawToolOption(DrawTool.ERASER, "Eraser", Icons.Default.AutoFixNormal),
+)
+
+/**
+ * Colours that read against typical map art -- stone greys, grass greens,
+ * parchment. `#AARRGGBB`, as they go on the wire.
+ */
+private val DRAW_COLORS = listOf(
+    "#FFE53935" to "Red",
+    "#FFFFB300" to "Amber",
+    "#FF43A047" to "Green",
+    "#FF1E88E5" to "Blue",
+    "#FF8E24AA" to "Purple",
+    "#FFFFFFFF" to "White",
+    "#FF000000" to "Black",
+)
 
 /** Same look as the tool chips, so the two rows read as one set of choices. */
 @Composable

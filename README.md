@@ -31,6 +31,10 @@ middle of the table as the battle map.
   Both are remembered between sessions.
 - **Ping.** Someone asks "where's the door?" — tap the map and a pink marker
   pulses there on the players' screen for a couple of seconds, over the fog.
+- **Draw.** Freehand pen, rectangles, ovals and arrows in seven colours, drawn
+  live onto the players' screen over the fog. An eraser removes a whole line
+  or shape with one swipe; undo and redo cover drawings and fog together.
+  Drawings are saved per map.
 - **Curtain.** Hide the TV during a break without losing any state.
 - **Keeps running when you switch apps.** Look up a rule, roll dice, answer a
   message — the players' screen stays live. A notification shows the address

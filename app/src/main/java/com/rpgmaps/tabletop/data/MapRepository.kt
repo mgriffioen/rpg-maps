@@ -7,9 +7,12 @@ import android.net.Uri
 import com.rpgmaps.tabletop.data.db.AppDatabase
 import com.rpgmaps.tabletop.data.db.MapDao
 import com.rpgmaps.tabletop.data.db.MapEntity
+import com.rpgmaps.tabletop.display.protocol.DisplayJson
+import com.rpgmaps.tabletop.display.protocol.Drawing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.ListSerializer
 import java.io.File
 
 /**
@@ -101,11 +104,35 @@ class MapRepository(private val context: Context) {
     suspend fun writeFogPng(id: String, png: ByteArray) = withContext(Dispatchers.IO) {
         val files = MapFiles(context, id)
         files.ensureDir()
-        val tmp = File(files.dir, "fog.png.tmp")
-        tmp.writeBytes(png)
-        if (!tmp.renameTo(files.fog)) {
-            files.fog.writeBytes(png)
+        writeAtomically(files.fog, png)
+    }
+
+    /**
+     * The map's drawings, or none if the file is missing or unreadable. Like a
+     * corrupt fog mask, a corrupt drawings file must not stop a map opening.
+     */
+    suspend fun readDrawings(id: String): List<Drawing> = withContext(Dispatchers.IO) {
+        val file = MapFiles(context, id).drawings
+        if (!file.exists()) return@withContext emptyList()
+        runCatching { DisplayJson.decodeFromString(drawingsSerializer, file.readText()) }
+            .getOrDefault(emptyList())
+    }
+
+    suspend fun writeDrawings(id: String, drawings: List<Drawing>) = withContext(Dispatchers.IO) {
+        val files = MapFiles(context, id)
+        files.ensureDir()
+        writeAtomically(files.drawings, DisplayJson.encodeToString(drawingsSerializer, drawings).toByteArray())
+    }
+
+    /** Temp file and rename, so a dead battery mid-save cannot truncate [target]. */
+    private fun writeAtomically(target: File, bytes: ByteArray) {
+        val tmp = File(target.parentFile, target.name + ".tmp")
+        tmp.writeBytes(bytes)
+        if (!tmp.renameTo(target)) {
+            target.writeBytes(bytes)
             tmp.delete()
         }
     }
+
+    private val drawingsSerializer = ListSerializer(Drawing.serializer())
 }

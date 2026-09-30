@@ -153,6 +153,45 @@ the mask looks like the tool failed.
 stroke, and show brush sliders, for a tool with no brush. They now go through
 `MapTool.editsFog`.
 
+## Drawings are a list, not a bitmap
+
+Fog is a mask because a session produces thousands of strokes. Drawings are
+the opposite case -- a few arrows and circles an evening -- so they are a list
+of `Drawing` objects in **map pixels**, persisted as `drawings.json` beside
+the fog. Three things fall out of that:
+
+- **The eraser removes whole objects.** A swipe over an arrow takes the arrow,
+  head and all. A pixel eraser would leave arrowheads floating without their
+  shafts, which nobody wants on a battle map.
+- **Lines stay crisp at any zoom.** Both renderers stroke the geometry at the
+  current transform instead of scaling a raster.
+- **Undo is a snapshot of the list.** The lists are immutable and share their
+  items, so a snapshot is one array of references (`DrawingLayer`).
+
+Width is chosen in *screen* pixels and converted to map pixels at the zoom the
+line is drawn at, so a line looks as thick as the DM picked while drawing it and
+then scales with the map like everything else on it.
+
+On the wire, `draw` upserts one drawing by id, `drawpts` extends a pen line in
+40 ms batches, `undraw` removes, and `drawset` replaces the lot. Upsert is what
+lets a rectangle follow the DM's finger on the TV, and the final upsert on
+finger-up repairs anything a receiver missed mid-stroke. Unlike pings they are
+state, so `pushFullState` sends `drawset` -- always, even empty, because that is
+also what clears the previous map's drawings off a receiver that stayed
+connected. The hub asks a provider for them rather than tracking pen points
+itself, the same arrangement as the fog snapshot.
+
+They draw **over** the fog, for the same reason pings do. `drawDrawing`
+(MapCanvas.kt) and `drawDrawings` (receiver) must agree on round caps and
+joins and on the arrowhead, which both derive from the constants in
+`DisplayMessage.kt`.
+
+**Undo is one timeline across two layers.** Fog keeps PNG snapshots and
+drawings keep lists, but the DM has one pair of buttons and expects them to
+step back through whatever was done last. `MapViewModel` records which layer
+each edit touched and walks that order; each layer only knows how to undo its
+own steps, and a new edit on either one clears the other's redo branch.
+
 ## Staying alive in the background
 
 Nothing in this app ever stopped the LAN server or the Cast session — the hub

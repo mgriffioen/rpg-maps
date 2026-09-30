@@ -14,7 +14,12 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.rpgmaps.tabletop.RpgMapsApplication
 import com.rpgmaps.tabletop.data.db.MapEntity
+import com.rpgmaps.tabletop.data.AppSettings
 import com.rpgmaps.tabletop.display.protocol.BlankMessage
+import com.rpgmaps.tabletop.display.protocol.DrawKind
+import com.rpgmaps.tabletop.display.protocol.DrawSetMessage
+import com.rpgmaps.tabletop.display.protocol.DrawUpsertMessage
+import com.rpgmaps.tabletop.display.protocol.Drawing
 import com.rpgmaps.tabletop.display.protocol.FogOp
 import com.rpgmaps.tabletop.display.protocol.FogShape
 import com.rpgmaps.tabletop.display.protocol.GridMessage
@@ -23,6 +28,7 @@ import com.rpgmaps.tabletop.display.protocol.MARK_DURATION_MS
 import com.rpgmaps.tabletop.display.protocol.MarkMessage
 import com.rpgmaps.tabletop.display.protocol.RotationMessage
 import com.rpgmaps.tabletop.display.protocol.ViewportMessage
+import com.rpgmaps.tabletop.draw.DrawingLayer
 import com.rpgmaps.tabletop.fog.FogEditor
 import com.rpgmaps.tabletop.fog.FogMask
 import com.rpgmaps.tabletop.ui.library.application
@@ -42,11 +48,34 @@ import kotlin.math.abs
 import kotlin.math.hypot
 
 /** What a one-finger drag on the map does. Two fingers always pan and zoom. */
-enum class MapTool { PAN, REVEAL, HIDE, PING }
+enum class MapTool { PAN, REVEAL, HIDE, PING, DRAW }
 
 /** True for the tools that edit the fog mask, as opposed to moving or marking. */
 val MapTool.editsFog: Boolean
     get() = this == MapTool.REVEAL || this == MapTool.HIDE
+
+/**
+ * True for the tools where one finger changes the map rather than moving it.
+ * Those must not fall back to panning after a pinch: lifting one of the two
+ * fingers would otherwise drag the map unexpectedly.
+ */
+val MapTool.usesFinger: Boolean
+    get() = editsFog || this == MapTool.DRAW
+
+/** What the Draw tool puts down. [kind] is null for the eraser, which draws nothing. */
+enum class DrawTool(val kind: DrawKind?) {
+    PEN(DrawKind.PEN),
+    RECT(DrawKind.RECT),
+    OVAL(DrawKind.OVAL),
+    ARROW(DrawKind.ARROW),
+    ERASER(null),
+}
+
+/**
+ * How close, in screen pixels, the eraser has to pass to a line to remove it.
+ * In screen pixels so it feels the same size under the finger at any zoom.
+ */
+const val ERASER_RADIUS_PX: Float = 22f
 
 /**
  * A ping still animating on the DM's canvas.
@@ -141,6 +170,52 @@ class MapViewModel(
         private set
     var canRedo by mutableStateOf(false)
         private set
+
+    // --- drawings ---------------------------------------------------------
+
+    private var drawingLayer = DrawingLayer()
+
+    /** False until the saved drawings are read, so a failed open never overwrites them. */
+    private var drawingsLoaded = false
+
+    /** Every drawing to paint, including the one under the finger. */
+    var drawings by mutableStateOf<List<Drawing>>(emptyList())
+        private set
+
+    var drawTool by mutableStateOf(DrawTool.PEN)
+        private set
+
+    /** `#AARRGGBB`, exactly as it goes on the wire. */
+    var drawColor by mutableStateOf(AppSettings.DEFAULT_DRAW_COLOR)
+        private set
+
+    /**
+     * Line width in *screen* pixels. Converted to map pixels at the zoom the
+     * line is drawn at, so a line looks as thick as the DM chose while drawing
+     * it, then scales with the map like everything else on it.
+     */
+    var drawWidth by mutableStateOf(AppSettings.DEFAULT_DRAW_WIDTH)
+        private set
+
+    /** Where the eraser is, in map pixels, while a finger is erasing. */
+    var eraserAt by mutableStateOf<Pair<Float, Float>?>(null)
+        private set
+
+    // update*, not set*: see updateFogShape.
+    fun updateDrawTool(value: DrawTool) {
+        cancelDraw()
+        drawTool = value
+    }
+
+    fun updateDrawColor(value: String) {
+        drawColor = value
+        viewModelScope.launch { app.settings.setDrawColor(value) }
+    }
+
+    fun updateDrawWidth(value: Float) {
+        drawWidth = value
+        viewModelScope.launch { app.settings.setDrawWidth(value) }
+    }
 
     // --- what the players see --------------------------------------------
 
@@ -326,6 +401,8 @@ class MapViewModel(
 
     private var strokeFlushJob: Job? = null
     private var fogSaveJob: Job? = null
+    private var drawFlushJob: Job? = null
+    private var drawingsSaveJob: Job? = null
 
     init {
         viewModelScope.launch { load() }
@@ -343,6 +420,8 @@ class MapViewModel(
             val settings = app.settings.flow.first()
             brushRadiusMapPx = settings.brushRadiusMapPx
             brushSoftness = settings.brushSoftness
+            drawColor = settings.drawColor
+            drawWidth = settings.drawWidth
 
             val bitmap = app.repository.loadDisplayBitmap(mapId)
             if (bitmap == null) {
@@ -355,6 +434,10 @@ class MapViewModel(
             val mask = FogMask.fromPngOrHidden(fogPng, entity.fogW, entity.fogH)
             editor = FogEditor(mask)
             fogImage = mask.bitmap.asImageBitmap()
+
+            drawingLayer = DrawingLayer(app.repository.readDrawings(mapId))
+            drawingsLoaded = true
+            refreshDrawings()
 
             gridEnabled = entity.gridEnabled
             tvRotationQuarters = settings.rotationQuarters
@@ -400,6 +483,9 @@ class MapViewModel(
             // a better trade than a torn snapshot mid-stroke.
             fogSnapshotProvider = {
                 withContext(Dispatchers.Main) { editor?.mask?.toPng() }
+            },
+            drawingsProvider = {
+                withContext(Dispatchers.Main) { drawingLayer.visible }
             },
         )
     }
@@ -568,7 +654,7 @@ class MapViewModel(
     fun startStroke(screenX: Float, screenY: Float) {
         val entity = map.value ?: return
         val currentEditor = editor ?: return
-        if (tool == MapTool.PAN) return
+        if (!tool.editsFog) return
 
         val (fx, fy) = mapToFog(entity, screenX, screenY)
         currentEditor.startStroke(
@@ -578,6 +664,7 @@ class MapViewModel(
             x = fx,
             y = fy,
         )
+        recordEdit(Layer.FOG)
         startFlushing()
     }
 
@@ -630,7 +717,7 @@ class MapViewModel(
     // --- shapes -----------------------------------------------------------
 
     fun beginShape(screenX: Float, screenY: Float) {
-        if (tool == MapTool.PAN || fogShape == FogShape.BRUSH) return
+        if (!tool.editsFog || fogShape == FogShape.BRUSH) return
         shapeStart = screenToMap(screenX, screenY)
         shapeEnd = shapeStart
     }
@@ -654,7 +741,7 @@ class MapViewModel(
         val end = shapeEnd
         cancelShape()
         if (entity == null || currentEditor == null || start == null || end == null) return
-        if (fogShape == FogShape.BRUSH || tool == MapTool.PAN) return
+        if (fogShape == FogShape.BRUSH || !tool.editsFog) return
 
         val (x0, y0) = mapToFogPoint(entity, start)
         val (x1, y1) = mapToFogPoint(entity, end)
@@ -669,6 +756,7 @@ class MapViewModel(
             shape = fogShape,
         )
         val seq = currentEditor.applyOnce(op)
+        recordEdit(Layer.FOG)
         fogVersion++
         app.displayHub.sendFogOps(seq, listOf(op))
         refreshHistoryFlags()
@@ -685,34 +773,229 @@ class MapViewModel(
     private fun fill(fogged: Boolean) {
         val currentEditor = editor ?: return
         val seq = currentEditor.fill(fogged)
+        recordEdit(Layer.FOG)
         fogVersion++
         app.displayHub.sendFogFill(seq, fogged)
         refreshHistoryFlags()
         scheduleFogSave()
     }
 
-    fun undo() {
-        val currentEditor = editor ?: return
-        val seq = currentEditor.undo() ?: return
-        fogVersion++
-        // Undo cannot be expressed as an op, so the whole mask goes over.
-        app.displayHub.sendFogSnapshot(seq, currentEditor.mask.toPng())
+    // --- drawing --------------------------------------------------------
+
+    /** Opens a line, shape or arrow -- or an erase -- under the finger. */
+    fun beginDraw(screenX: Float, screenY: Float) {
+        if (tool != MapTool.DRAW) return
+        val kind = drawTool.kind
+        if (kind == null) {
+            drawingLayer.beginErase()
+            eraseAt(screenX, screenY)
+            return
+        }
+        val (mx, my) = screenToMap(screenX, screenY)
+        drawingLayer.begin(kind, drawColor, drawWidth / scale(), mx, my)
+        refreshDrawings()
+        startDrawFlushing()
+    }
+
+    fun updateDraw(screenX: Float, screenY: Float) {
+        if (drawTool == DrawTool.ERASER) {
+            eraseAt(screenX, screenY)
+            return
+        }
+        val (mx, my) = screenToMap(screenX, screenY)
+        drawingLayer.extend(mx, my, minStep = PEN_MIN_STEP_PX / scale())
+        refreshDrawings()
+    }
+
+    /** Commits what the finger drew, or closes the erase, as one undo step. */
+    fun endDraw() {
+        stopDrawFlushing()
+        if (eraserAt != null || drawTool == DrawTool.ERASER) {
+            eraserAt = null
+            if (drawingLayer.endErase()) drawingsEdited()
+            return
+        }
+        val message = drawingLayer.commit() ?: return
+        app.displayHub.sendDrawing(message)
+        refreshDrawings()
+        if (message is DrawUpsertMessage) drawingsEdited()
+    }
+
+    /** Abandons a half-drawn shape, e.g. when a second finger starts a pinch. */
+    fun cancelDraw() {
+        stopDrawFlushing()
+        eraserAt = null
+        if (drawingLayer.endErase()) drawingsEdited()
+        drawingLayer.cancel()?.let { app.displayHub.sendDrawing(it) }
+        refreshDrawings()
+    }
+
+    private fun eraseAt(screenX: Float, screenY: Float) {
+        val (mx, my) = screenToMap(screenX, screenY)
+        eraserAt = mx to my
+        drawingLayer.eraseAt(mx, my, ERASER_RADIUS_PX / scale())?.let {
+            app.displayHub.sendDrawing(it)
+            refreshDrawings()
+        }
+    }
+
+    /** Removes every drawing from this map, undoably. */
+    fun clearDrawings() {
+        cancelDraw()
+        if (!drawingLayer.clear()) return
+        app.displayHub.sendDrawing(DrawSetMessage(emptyList()))
+        refreshDrawings()
+        drawingsEdited()
+    }
+
+    /**
+     * Streams the drawing under the finger on the same 40 ms beat as fog
+     * strokes, so the players watch a line being drawn rather than seeing it
+     * appear all at once.
+     */
+    private fun startDrawFlushing() {
+        drawFlushJob?.cancel()
+        drawFlushJob = viewModelScope.launch {
+            while (isActive) {
+                drawingLayer.flush()?.let { app.displayHub.sendDrawing(it) }
+                delay(STROKE_FLUSH_MS)
+            }
+        }
+    }
+
+    private fun stopDrawFlushing() {
+        drawFlushJob?.cancel()
+        drawFlushJob = null
+    }
+
+    private fun refreshDrawings() {
+        drawings = drawingLayer.visible
+    }
+
+    private fun drawingsEdited() {
+        recordEdit(Layer.DRAWINGS)
         refreshHistoryFlags()
-        scheduleFogSave()
+        scheduleDrawingsSave()
+    }
+
+    private fun scheduleDrawingsSave() {
+        drawingsSaveJob?.cancel()
+        drawingsSaveJob = viewModelScope.launch {
+            delay(FOG_SAVE_DEBOUNCE_MS)
+            app.repository.writeDrawings(mapId, drawingLayer.items)
+        }
+    }
+
+    // --- history ----------------------------------------------------------
+
+    /** The two things undo can step back through. */
+    private enum class Layer { FOG, DRAWINGS }
+
+    /**
+     * Which layer each undo step belongs to, oldest first.
+     *
+     * Fog and drawings keep their own snapshots -- a PNG and a list are not
+     * the same kind of thing -- but the DM has one pair of undo and redo
+     * buttons and expects them to step back through *whatever they did last*.
+     * These two queues are that shared timeline; each layer only knows how
+     * to undo its own steps.
+     */
+    private val undoOrder = ArrayDeque<Layer>()
+    private val redoOrder = ArrayDeque<Layer>()
+
+    /** Notes a new edit on [layer], which ends the redo future on both layers. */
+    private fun recordEdit(layer: Layer) {
+        undoOrder.addLast(layer)
+        while (undoOrder.size > MAX_UNDO_ORDER) undoOrder.removeFirst()
+        redoOrder.clear()
+        // The edited layer has already dropped its own redo branch.
+        when (layer) {
+            Layer.FOG -> drawingLayer.clearRedo()
+            Layer.DRAWINGS -> editor?.clearRedo()
+        }
+    }
+
+    fun undo() {
+        cancelDraw()
+        val layer = takeLayer(undoOrder, ::canUndoLayer) ?: return
+        if (undoLayer(layer)) redoOrder.addLast(layer)
+        refreshHistoryFlags()
     }
 
     fun redo() {
-        val currentEditor = editor ?: return
-        val seq = currentEditor.redo() ?: return
-        fogVersion++
-        app.displayHub.sendFogSnapshot(seq, currentEditor.mask.toPng())
+        cancelDraw()
+        val layer = takeLayer(redoOrder, ::canRedoLayer) ?: return
+        if (redoLayer(layer)) undoOrder.addLast(layer)
         refreshHistoryFlags()
-        scheduleFogSave()
+    }
+
+    /**
+     * The layer whose step comes next. Entries whose layer has no history
+     * left -- the fog trims its snapshots to 30 -- are skipped rather than
+     * swallowing a tap; if the timeline runs dry first, any layer that still
+     * has something to give is used.
+     */
+    private fun takeLayer(order: ArrayDeque<Layer>, has: (Layer) -> Boolean): Layer? {
+        while (order.isNotEmpty()) {
+            val layer = order.removeLast()
+            if (has(layer)) return layer
+        }
+        return Layer.entries.firstOrNull(has)
+    }
+
+    private fun canUndoLayer(layer: Layer): Boolean = when (layer) {
+        Layer.FOG -> editor?.canUndo == true
+        Layer.DRAWINGS -> drawingLayer.canUndo
+    }
+
+    private fun canRedoLayer(layer: Layer): Boolean = when (layer) {
+        Layer.FOG -> editor?.canRedo == true
+        Layer.DRAWINGS -> drawingLayer.canRedo
+    }
+
+    private fun undoLayer(layer: Layer): Boolean = when (layer) {
+        Layer.FOG -> {
+            val currentEditor = editor
+            val seq = currentEditor?.undo()
+            if (currentEditor != null && seq != null) {
+                fogVersion++
+                // Undo cannot be expressed as an op, so the whole mask goes over.
+                app.displayHub.sendFogSnapshot(seq, currentEditor.mask.toPng())
+                scheduleFogSave()
+                true
+            } else {
+                false
+            }
+        }
+        Layer.DRAWINGS -> drawingLayer.undo().also { if (it) drawingsRestored() }
+    }
+
+    private fun redoLayer(layer: Layer): Boolean = when (layer) {
+        Layer.FOG -> {
+            val currentEditor = editor
+            val seq = currentEditor?.redo()
+            if (currentEditor != null && seq != null) {
+                fogVersion++
+                app.displayHub.sendFogSnapshot(seq, currentEditor.mask.toPng())
+                scheduleFogSave()
+                true
+            } else {
+                false
+            }
+        }
+        Layer.DRAWINGS -> drawingLayer.redo().also { if (it) drawingsRestored() }
+    }
+
+    /** After undo or redo the list is small, so it simply goes over whole. */
+    private fun drawingsRestored() {
+        app.displayHub.sendDrawing(DrawSetMessage(drawingLayer.visible))
+        refreshDrawings()
+        scheduleDrawingsSave()
     }
 
     private fun refreshHistoryFlags() {
-        canUndo = editor?.canUndo == true
-        canRedo = editor?.canRedo == true
+        canUndo = editor?.canUndo == true || drawingLayer.canUndo
+        canRedo = editor?.canRedo == true || drawingLayer.canRedo
     }
 
     /** Coalesces rapid edits into one write instead of hammering flash. */
@@ -814,11 +1097,17 @@ class MapViewModel(
         super.onCleared()
         strokeFlushJob?.cancel()
         fogSaveJob?.cancel()
+        drawFlushJob?.cancel()
+        drawingsSaveJob?.cancel()
         // Best effort: the scope is already cancelled, so use the app scope.
         val currentEditor = editor
         if (currentEditor != null) {
             val png = currentEditor.mask.toPng()
             app.appScope.launch { app.repository.writeFogPng(mapId, png) }
+        }
+        if (drawingsLoaded) {
+            val items = drawingLayer.items
+            app.appScope.launch { app.repository.writeDrawings(mapId, items) }
         }
     }
 
@@ -836,6 +1125,16 @@ class MapViewModel(
 
         /** ~60 Hz, so the ping animation is smooth under the finger. */
         private const val PING_FRAME_MS = 16L
+
+        /**
+         * Screen pixels a finger must move before a pen line gains a point.
+         * Finer than the eye can see, coarse enough to drop the jitter of a
+         * resting finger.
+         */
+        private const val PEN_MIN_STEP_PX = 1.5f
+
+        /** Room for both layers' full histories, 30 fog + 50 drawing steps. */
+        private const val MAX_UNDO_ORDER = 100
 
         fun factory(mapId: String): ViewModelProvider.Factory = viewModelFactory {
             initializer { MapViewModel(application(this), mapId) }

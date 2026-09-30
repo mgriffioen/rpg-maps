@@ -19,6 +19,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
@@ -26,11 +29,14 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
+import com.rpgmaps.tabletop.display.protocol.DrawKind
+import com.rpgmaps.tabletop.display.protocol.Drawing
 import com.rpgmaps.tabletop.display.protocol.FogShape
 import com.rpgmaps.tabletop.display.protocol.MARK_DURATION_MS
 import com.rpgmaps.tabletop.display.protocol.MARK_FADE_TAIL
 import com.rpgmaps.tabletop.display.protocol.MARK_PULSES
 import com.rpgmaps.tabletop.display.protocol.MARK_RADIUS_FRACTION
+import com.rpgmaps.tabletop.draw.arrowHead
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 
@@ -66,7 +72,9 @@ fun MapCanvas(
         modifier = modifier
             .background(Color(0xFF05070C))
             .onSizeChanged { viewModel.onCanvasSized(it.width.toFloat(), it.height.toFloat()) }
-            .pointerInput(viewModel.tool, viewModel.fogShape) { handleMapGestures(viewModel) },
+            .pointerInput(viewModel.tool, viewModel.fogShape, viewModel.drawTool) {
+                handleMapGestures(viewModel)
+            },
     ) {
         Canvas(Modifier.fillMaxSize()) {
             // Read so Compose repaints when the mask is drawn into. The bitmap
@@ -135,6 +143,21 @@ fun MapCanvas(
                         dstSize = IntSize(map.imageW, map.imageH),
                         alpha = DM_FOG_ALPHA,
                         colorFilter = ColorFilter.tint(FOG_TINT, BlendMode.SrcIn),
+                    )
+                }
+
+                // Over the fog, like a ping: drawings are the DM showing the
+                // table something, and one hidden by the mask would look like
+                // the pen had failed. The TV draws them in the same place.
+                viewModel.drawings.forEach { drawDrawing(it) }
+
+                viewModel.eraserAt?.let { (x, y) ->
+                    drawCircle(
+                        color = Color.White,
+                        radius = ERASER_RADIUS_PX / scale,
+                        center = Offset(x, y),
+                        alpha = 0.8f,
+                        style = Stroke(width = 1.5f / scale),
                     )
                 }
 
@@ -283,6 +306,63 @@ private fun DrawScope.drawPing(ping: ActivePing, now: Long, halfH: Float) {
     )
 }
 
+/**
+ * One drawing, in map space. `drawDrawings` in receiver/index.html is the
+ * mirror of this: same round caps and joins, same arrowhead from [arrowHead],
+ * outlines only.
+ */
+private fun DrawScope.drawDrawing(d: Drawing) {
+    val color = parseArgb(d.color)
+    val stroke = Stroke(width = d.width, cap = StrokeCap.Round, join = StrokeJoin.Round)
+    val p = d.pts
+    when (d.kind) {
+        DrawKind.PEN -> {
+            if (p.size < 2) return
+            if (p.size < 4) {
+                drawCircle(color, radius = d.width / 2f, center = Offset(p[0], p[1]))
+                return
+            }
+            val path = Path().apply {
+                moveTo(p[0], p[1])
+                var i = 2
+                while (i + 1 < p.size) {
+                    lineTo(p[i], p[i + 1])
+                    i += 2
+                }
+            }
+            drawPath(path, color, style = stroke)
+        }
+        DrawKind.RECT, DrawKind.OVAL -> {
+            if (p.size < 4) return
+            val topLeft = Offset(minOf(p[0], p[2]), minOf(p[1], p[3]))
+            val size = Size(kotlin.math.abs(p[2] - p[0]), kotlin.math.abs(p[3] - p[1]))
+            if (d.kind == DrawKind.OVAL) {
+                drawOval(color, topLeft, size, style = stroke)
+            } else {
+                drawRect(color, topLeft, size, style = stroke)
+            }
+        }
+        DrawKind.ARROW -> {
+            if (p.size < 4) return
+            val path = Path().apply {
+                moveTo(p[0], p[1])
+                lineTo(p[2], p[3])
+                arrowHead(p[0], p[1], p[2], p[3], d.width)?.let { head ->
+                    moveTo(head[0], head[1])
+                    lineTo(p[2], p[3])
+                    lineTo(head[2], head[3])
+                }
+            }
+            drawPath(path, color, style = stroke)
+        }
+    }
+}
+
+/** `#AARRGGBB` or `#RRGGBB`; anything unreadable falls back to the default red. */
+internal fun parseArgb(value: String): Color =
+    runCatching { Color(android.graphics.Color.parseColor(value)) }
+        .getOrDefault(Color(0xFFE53935))
+
 /** The calibration ruler the DM drags across a known square. */
 private fun DrawScope.drawMeasureLine(
     start: Pair<Float, Float>?,
@@ -315,6 +395,7 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.handleMa
         var painting = false
         var measuring = false
         var shaping = false
+        var drawing = false
         var usedMultiTouch = false
 
         // How far the finger travelled, to tell a ping tap from a pan drag.
@@ -324,6 +405,7 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.handleMa
         // explicitly: written as `tool != PAN` these branches would start a
         // brush stroke the moment the DM tried to mark a spot.
         val editsFog = viewModel.tool.editsFog
+        val usesFinger = viewModel.tool.usesFinger
 
         if (viewModel.calibrating) {
             measuring = true
@@ -336,6 +418,10 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.handleMa
         } else if (editsFog) {
             painting = true
             viewModel.startStroke(down.position.x, down.position.y)
+            down.consume()
+        } else if (viewModel.tool == MapTool.DRAW) {
+            drawing = true
+            viewModel.beginDraw(down.position.x, down.position.y)
             down.consume()
         }
 
@@ -355,6 +441,16 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.handleMa
                 if (shaping) {
                     viewModel.cancelShape()
                     shaping = false
+                }
+                // Same for a drawing: a pen line is kept, like a fog stroke,
+                // but a half-dragged shape or arrow is dropped.
+                if (drawing) {
+                    if (viewModel.drawTool == DrawTool.PEN || viewModel.drawTool == DrawTool.ERASER) {
+                        viewModel.endDraw()
+                    } else {
+                        viewModel.cancelDraw()
+                    }
+                    drawing = false
                 }
                 measuring = false
                 usedMultiTouch = true
@@ -382,10 +478,15 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.handleMa
                         viewModel.extendStroke(change.position.x, change.position.y)
                         change.consume()
                     }
-                    // Outside a fog tool a single finger always pans. Within
-                    // one it must not resume panning after a pinch -- lifting
-                    // one finger would otherwise drag the map unexpectedly.
-                    !editsFog || !usedMultiTouch -> {
+                    drawing -> {
+                        viewModel.updateDraw(change.position.x, change.position.y)
+                        change.consume()
+                    }
+                    // Outside a fog or draw tool a single finger always pans.
+                    // Within one it must not resume panning after a pinch --
+                    // lifting one finger would otherwise drag the map
+                    // unexpectedly.
+                    !usesFinger || !usedMultiTouch -> {
                         val delta = change.positionChange()
                         travel += delta.getDistance()
                         viewModel.pan(delta.x, delta.y)
@@ -397,6 +498,7 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.handleMa
 
         if (painting) viewModel.endStroke()
         if (shaping) viewModel.endShape()
+        if (drawing) viewModel.endDraw()
 
         // A ping is a tap, so the same gesture still pans when dragged. Using
         // touch slop rather than a zero threshold matters on a tablet held in
