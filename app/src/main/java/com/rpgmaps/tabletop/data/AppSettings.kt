@@ -40,6 +40,10 @@ class AppSettings(private val context: Context) {
          * standing, this one says which way the map should face on it.
          */
         val mapRotationQuarters: Int = 0,
+        /** `#AARRGGBB`, as it goes on the wire. */
+        val drawColor: String = DEFAULT_DRAW_COLOR,
+        /** Screen pixels on the DM's canvas at the moment a line is drawn. */
+        val drawWidth: Float = DEFAULT_DRAW_WIDTH,
     )
 
     val flow: Flow<Snapshot> = context.settingsStore.data.map { p ->
@@ -52,6 +56,8 @@ class AppSettings(private val context: Context) {
             serverPort = p[KEY_SERVER_PORT] ?: DEFAULT_PORT,
             rotationQuarters = (p[KEY_ROTATION] ?: 0).mod(4),
             mapRotationQuarters = (p[KEY_MAP_ROTATION] ?: 0).mod(4),
+            drawColor = p[KEY_DRAW_COLOR] ?: DEFAULT_DRAW_COLOR,
+            drawWidth = p[KEY_DRAW_WIDTH] ?: DEFAULT_DRAW_WIDTH,
         )
     }
 
@@ -63,6 +69,8 @@ class AppSettings(private val context: Context) {
     suspend fun setServerPort(value: Int) = put(KEY_SERVER_PORT, value)
     suspend fun setRotationQuarters(value: Int) = put(KEY_ROTATION, value.mod(4))
     suspend fun setMapRotationQuarters(value: Int) = put(KEY_MAP_ROTATION, value.mod(4))
+    suspend fun setDrawColor(value: String) = put(KEY_DRAW_COLOR, value)
+    suspend fun setDrawWidth(value: Float) = put(KEY_DRAW_WIDTH, value)
 
     private suspend fun <T> put(key: Preferences.Key<T>, value: T) {
         context.settingsStore.edit { it[key] = value }
@@ -72,6 +80,10 @@ class AppSettings(private val context: Context) {
         /** Well above 1024 so no root privileges are needed, and easy to type. */
         const val DEFAULT_PORT = 8770
 
+        /** Red: reads against almost any map art, and means "look here". */
+        const val DEFAULT_DRAW_COLOR = "#FFE53935"
+        const val DEFAULT_DRAW_WIDTH = 8f
+
         private val KEY_DISPLAY_MAX_DIM = intPreferencesKey("display_max_dim")
         private val KEY_TV_DIAGONAL = floatPreferencesKey("tv_diagonal_inches")
         private val KEY_BRUSH_RADIUS = floatPreferencesKey("brush_radius_map_px")
@@ -80,5 +92,7 @@ class AppSettings(private val context: Context) {
         private val KEY_SERVER_PORT = intPreferencesKey("server_port")
         private val KEY_ROTATION = intPreferencesKey("rotation_quarters")
         private val KEY_MAP_ROTATION = intPreferencesKey("map_rotation_quarters")
+        private val KEY_DRAW_COLOR = stringPreferencesKey("draw_color")
+        private val KEY_DRAW_WIDTH = floatPreferencesKey("draw_width")
     }
 }

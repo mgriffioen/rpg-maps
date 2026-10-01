@@ -29,7 +29,13 @@ jobs:
 
       # Installs the Android command-line tools and accepts the SDK licences,
       # which is what lets Gradle fetch the compileSdk 36 platform by itself.
+      #
+      # `packages` is set explicitly because the default also asks for the
+      # legacy "tools" package, which cmdline-tools 16 no longer offers --
+      # sdkmanager then exits 1 and the job dies before any Gradle runs.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       # Caches the Gradle distribution and dependency downloads between runs.
       - uses: gradle/actions/setup-gradle@v4

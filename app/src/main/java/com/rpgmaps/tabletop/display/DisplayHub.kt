@@ -4,6 +4,8 @@ import android.util.Base64
 import android.util.Log
 import com.rpgmaps.tabletop.display.protocol.BlankMessage
 import com.rpgmaps.tabletop.display.protocol.DisplayMessage
+import com.rpgmaps.tabletop.display.protocol.DrawSetMessage
+import com.rpgmaps.tabletop.display.protocol.Drawing
 import com.rpgmaps.tabletop.display.protocol.FogFillMessage
 import com.rpgmaps.tabletop.display.protocol.FogOp
 import com.rpgmaps.tabletop.display.protocol.FogOpsMessage
@@ -89,6 +91,13 @@ class DisplayHub(private val scope: CoroutineScope) {
      */
     private var fogSnapshot: (suspend () -> ByteArray?)? = null
 
+    /**
+     * Supplies every drawing, including one still under the DM's finger, for
+     * the same reason: tracking pen points here as well would be a second copy
+     * of the drawing layer to keep right.
+     */
+    private var drawingsSnapshot: (suspend () -> List<Drawing>)? = null
+
     // Touched from the UI thread and read by the pump/push coroutines.
     @Volatile private var fogSeq: Long = 0
     @Volatile private var grid: GridMessage = GridMessage(false, 0f, 0f, 0f)
@@ -164,6 +173,7 @@ class DisplayHub(private val scope: CoroutineScope) {
      *
      * @param fogSnapshotProvider called on connect/resync to fetch the whole
      *        mask as PNG bytes.
+     * @param drawingsProvider called on connect/resync to fetch every drawing.
      */
     fun presentMap(
         announcement: MapAnnounced,
@@ -171,6 +181,7 @@ class DisplayHub(private val scope: CoroutineScope) {
         mime: String = "image/jpeg",
         fogSeq: Long,
         fogSnapshotProvider: suspend () -> ByteArray?,
+        drawingsProvider: suspend () -> List<Drawing>,
     ) {
         scope.launch {
             lock.withLock {
@@ -180,6 +191,7 @@ class DisplayHub(private val scope: CoroutineScope) {
                 imageMime = mime
                 this@DisplayHub.fogSeq = fogSeq
                 fogSnapshot = fogSnapshotProvider
+                drawingsSnapshot = drawingsProvider
             }
             _presenting.value = true
             _sinks.value.forEach { pushFullState(it) }
@@ -220,6 +232,15 @@ class DisplayHub(private val scope: CoroutineScope) {
         broadcast(spec)
     }
 
+    /**
+     * Any change to the drawings: an upsert, appended pen points, a removal
+     * or a whole new set. Not recorded -- [pushFullState] asks the drawings
+     * provider instead.
+     */
+    fun sendDrawing(message: DisplayMessage) {
+        broadcast(message)
+    }
+
     fun setGrid(spec: GridMessage) {
         grid = spec
         broadcast(spec)
@@ -242,6 +263,7 @@ class DisplayHub(private val scope: CoroutineScope) {
                 announced = null
                 imageBytes = null
                 fogSnapshot = null
+                drawingsSnapshot = null
                 pendingViewport = null
                 sentViewport = null
             }
@@ -281,6 +303,7 @@ class DisplayHub(private val scope: CoroutineScope) {
         val mime: String
         val revision: Int
         val snapshotProvider: (suspend () -> ByteArray?)?
+        val drawingsProvider: (suspend () -> List<Drawing>)?
         val seq: Long
         val gridSpec: GridMessage
         val blankSpec: BlankMessage
@@ -292,6 +315,7 @@ class DisplayHub(private val scope: CoroutineScope) {
             mime = imageMime
             revision = imageRevision
             snapshotProvider = fogSnapshot
+            drawingsProvider = drawingsSnapshot
             seq = fogSeq
             gridSpec = grid
             blankSpec = blank
@@ -316,6 +340,10 @@ class DisplayHub(private val scope: CoroutineScope) {
             } else {
                 sink.send(FogFillMessage(seq, fogged = true))
             }
+
+            // Always sent, even when empty: it is also what clears the
+            // previous map's drawings off a receiver that stayed connected.
+            sink.send(DrawSetMessage(drawingsProvider?.invoke() ?: emptyList()))
 
             sentViewport?.let { sink.send(it) } ?: pendingViewport?.let { sink.send(it) }
             sink.send(gridSpec)

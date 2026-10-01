@@ -87,7 +87,8 @@ var state = {
   grid: {enabled: false, pxPerSquare: 0, offsetX: 0, offsetY: 0, colorArgb: '#59FFFFFF'},
   blank: {on: false, text: ''},
   rot: 0,             // quarter-turns clockwise, 0..3
-  marks: []           // [{x, y, at}] in map px; transient, never resynced
+  marks: [],          // [{x, y, at}] in map px; transient, never resynced
+  drawings: []        // [{id, kind, color, width, pts}] in map px, paint order
 };
 
 var chunks = {revision: -1, parts: [], have: 0, count: 0, mime: 'image/jpeg'};
@@ -306,6 +307,9 @@ function handle(msg) {
 
   switch (msg.t) {
     case 'map':
+      // A different map brings its own drawings, which the full-state push
+      // sends straight after; never let the old ones linger over it.
+      if (!state.map || state.map.mapId !== msg.mapId) state.drawings = [];
       state.map = msg;
       ensureFog(msg.fogW, msg.fogH);
       // A new map invalidates any image still arriving for the old one.
@@ -364,6 +368,27 @@ function handle(msg) {
       state.marks.push({x: msg.x, y: msg.y, at: Date.now()});
       break;
 
+    case 'draw':
+      // Add, or replace the drawing with the same id: that is how a shape
+      // being dragged out follows the DM's finger.
+      upsertDrawing(msg.item);
+      break;
+
+    case 'drawpts':
+      var d = findDrawing(msg.id);
+      if (d && msg.pts) d.pts = d.pts.concat(msg.pts);
+      break;
+
+    case 'undraw':
+      state.drawings = state.drawings.filter(function (x) {
+        return msg.ids.indexOf(x.id) < 0;
+      });
+      break;
+
+    case 'drawset':
+      state.drawings = msg.items || [];
+      break;
+
     case 'blank':
       state.blank = msg;
       curtainText.textContent = msg.text || '';
@@ -372,6 +397,21 @@ function handle(msg) {
   }
 
   idleEl.classList.toggle('hidden', !!(state.map && state.image));
+}
+
+function findDrawing(id) {
+  for (var i = 0; i < state.drawings.length; i++) {
+    if (state.drawings[i].id === id) return state.drawings[i];
+  }
+  return null;
+}
+
+function upsertDrawing(item) {
+  if (!item || !item.pts) return;
+  for (var i = 0; i < state.drawings.length; i++) {
+    if (state.drawings[i].id === item.id) { state.drawings[i] = item; return; }
+  }
+  state.drawings.push(item);
 }
 
 function resetChunks(revision) {
@@ -471,9 +511,87 @@ function draw() {
     ctx.drawImage(state.fog, 0, 0, state.map.imageW, state.map.imageH);
   }
 
-  // After the fog, so a ping into an unrevealed room is still visible: the DM
-  // is pointing at a place, not revealing it.
+  // Drawings and pings both go over the fog: the DM is showing the table
+  // something, and an arrow swallowed by the mask would just look broken.
+  drawDrawings();
   drawMarks(view.halfH);
+}
+
+/* Mirrors the constants of the same name in DisplayMessage.kt. */
+var ARROW_HEAD_LENGTH_FACTOR = 4;
+var ARROW_HEAD_MAX_FRACTION = 0.5;
+var ARROW_HEAD_HALF_ANGLE_DEG = 28;
+
+/**
+ * The two barb ends of an arrowhead, [x0, y0, x1, y1], or null for an arrow
+ * with no length. Same sum as arrowHead() in DrawingGeometry.kt.
+ */
+function arrowHead(tx, ty, hx, hy, width) {
+  // Not Math.hypot: first-generation Chromecasts run a Chrome that predates it.
+  var length = Math.sqrt((hx - tx) * (hx - tx) + (hy - ty) * (hy - ty));
+  if (length < 0.001) return null;
+  var head = Math.min(width * ARROW_HEAD_LENGTH_FACTOR, length * ARROW_HEAD_MAX_FRACTION);
+  var back = Math.atan2(ty - hy, tx - hx);
+  var spread = ARROW_HEAD_HALF_ANGLE_DEG * Math.PI / 180;
+  return [
+    hx + head * Math.cos(back + spread), hy + head * Math.sin(back + spread),
+    hx + head * Math.cos(back - spread), hy + head * Math.sin(back - spread)
+  ];
+}
+
+/**
+ * Lines, rectangles, ovals and arrows, in map space. Must match drawDrawing()
+ * in MapCanvas.kt: outlines only, round caps and joins, width in map pixels.
+ */
+function drawDrawings() {
+  if (!state.drawings.length) return;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  for (var i = 0; i < state.drawings.length; i++) {
+    var d = state.drawings[i];
+    var p = d.pts;
+    if (!p || p.length < 2) continue;
+    var color = argbToCss(d.color);
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = d.width;
+    ctx.beginPath();
+
+    if (d.kind === 'pen') {
+      if (p.length < 4) {
+        // A tap is a dot, as wide as the line would have been.
+        ctx.arc(p[0], p[1], d.width / 2, 0, Math.PI * 2);
+        ctx.fill();
+        continue;
+      }
+      ctx.moveTo(p[0], p[1]);
+      for (var j = 2; j + 1 < p.length; j += 2) ctx.lineTo(p[j], p[j + 1]);
+    } else if (p.length < 4) {
+      continue;
+    } else if (d.kind === 'rect') {
+      ctx.rect(Math.min(p[0], p[2]), Math.min(p[1], p[3]),
+               Math.abs(p[2] - p[0]), Math.abs(p[3] - p[1]));
+    } else if (d.kind === 'oval') {
+      ctx.ellipse((p[0] + p[2]) / 2, (p[1] + p[3]) / 2,
+                  Math.abs(p[2] - p[0]) / 2, Math.abs(p[3] - p[1]) / 2,
+                  0, 0, Math.PI * 2);
+    } else if (d.kind === 'arrow') {
+      ctx.moveTo(p[0], p[1]);
+      ctx.lineTo(p[2], p[3]);
+      var h = arrowHead(p[0], p[1], p[2], p[3], d.width);
+      if (h) {
+        ctx.moveTo(h[0], h[1]);
+        ctx.lineTo(p[2], p[3]);
+        ctx.lineTo(h[2], h[3]);
+      }
+    } else {
+      continue;   // a kind from a newer tablet: skip rather than guess
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 /* Mirrors the constants of the same name in DisplayMessage.kt. */

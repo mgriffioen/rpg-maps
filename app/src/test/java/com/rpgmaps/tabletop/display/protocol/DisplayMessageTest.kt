@@ -48,6 +48,10 @@ class DisplayMessageTest {
             RotationMessage(3),
             MarkMessage(512.5f, 384.25f),
             BlankMessage(true, "Back in ten"),
+            DrawUpsertMessage(Drawing(5, DrawKind.ARROW, "#FFE53935", 6f, listOf(1f, 2f, 3f, 4f))),
+            DrawAppendMessage(5, listOf(7f, 8f)),
+            DrawRemoveMessage(listOf(5, 6)),
+            DrawSetMessage(listOf(Drawing(1, DrawKind.OVAL, "#FF000000", 2f, listOf(0f, 0f, 9f, 9f)))),
             ReceiverHello(1920, 1080, "Chromecast"),
             ResyncRequest(4),
         )
@@ -113,6 +117,23 @@ class DisplayMessageTest {
             """{"t":"fog","seq":1,"ops":[{"reveal":true,"radius":9.0,"softness":0.0,"pts":[1.0,2.0]}]}""",
         ) as FogOpsMessage
         assertEquals(FogShape.BRUSH, withoutShape.ops.first().shape)
+    }
+
+    /**
+     * The receiver reads `msg.item` on "draw", and `kind` as a lowercase
+     * string. Pin the whole shape so a rename cannot silently blank the
+     * players' drawings.
+     */
+    @Test
+    fun `drawings go over the wire in the shape the receiver reads`() {
+        val json = encode(DrawUpsertMessage(Drawing(7, DrawKind.PEN, "#FFFFFFFF", 3f, listOf(1f, 2f))))
+        assertEquals(
+            """{"t":"draw","item":{"id":7,"kind":"pen","color":"#FFFFFFFF","width":3.0,"pts":[1.0,2.0]}}""",
+            json,
+        )
+        assertEquals("""{"t":"drawpts","id":7,"pts":[3.0,4.0]}""", encode(DrawAppendMessage(7, listOf(3f, 4f))))
+        assertEquals("""{"t":"undraw","ids":[7]}""", encode(DrawRemoveMessage(listOf(7))))
+        assertEquals("""{"t":"drawset","items":[]}""", encode(DrawSetMessage(emptyList())))
     }
 
     @Test

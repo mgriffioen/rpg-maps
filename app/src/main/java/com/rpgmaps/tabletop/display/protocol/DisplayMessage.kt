@@ -239,6 +239,94 @@ const val MARK_RADIUS_FRACTION: Float = 0.045f
 /** Final fraction of the lifetime spent fading out. */
 const val MARK_FADE_TAIL: Float = 0.25f
 
+/** What a drawing is. Serialises to the lowercase name the receiver reads. */
+@Serializable
+enum class DrawKind {
+    @SerialName("pen") PEN,
+    @SerialName("rect") RECT,
+    @SerialName("oval") OVAL,
+    @SerialName("arrow") ARROW,
+}
+
+/**
+ * One annotation on the map: a freehand line, an outlined rectangle or oval,
+ * or an arrow. In **map pixels**, like the viewport, so drawings stay put on
+ * the artwork whatever the zoom or rotation of either screen.
+ *
+ * Unlike fog this is a list of shapes rather than a bitmap. A session produces
+ * a handful of drawings, not thousands of strokes, and keeping them as
+ * objects is what lets the eraser remove a whole arrow with one touch and the
+ * lines stay crisp at any zoom.
+ *
+ * [pts] means different things per [kind], the same way [FogOp.pts] does:
+ *
+ *  - [DrawKind.PEN]: a flat `x0, y0, x1, y1, ...` polyline; a single point is
+ *    a dot.
+ *  - [DrawKind.RECT] and [DrawKind.OVAL]: two opposite corners of the box.
+ *  - [DrawKind.ARROW]: tail then tip. The head is derived, see
+ *    [ARROW_HEAD_LENGTH_FACTOR].
+ *
+ * Everything is stroked with round caps and joins at [width], never filled.
+ * [color] is `#AARRGGBB`, the same form as [GridMessage.colorArgb].
+ */
+@Serializable
+data class Drawing(
+    val id: Long,
+    val kind: DrawKind,
+    val color: String,
+    val width: Float,
+    val pts: List<Float>,
+)
+
+/**
+ * Arrowhead length as a multiple of the line width, so a thick arrow gets a
+ * proportionally bigger head. Capped at [ARROW_HEAD_MAX_FRACTION] of the shaft
+ * so a short arrow is not all head. Mirrored in `arrowHead` in
+ * receiver/index.html.
+ */
+const val ARROW_HEAD_LENGTH_FACTOR: Float = 4f
+const val ARROW_HEAD_MAX_FRACTION: Float = 0.5f
+
+/** Half the angle between the two barbs of an arrowhead. */
+const val ARROW_HEAD_HALF_ANGLE_DEG: Float = 28f
+
+/**
+ * Adds a drawing, or replaces the one with the same [Drawing.id]. Replacing
+ * is how a rectangle being dragged out tracks the finger on the TV, and how a
+ * finished pen line settles to exactly the tablet's copy.
+ */
+@Serializable
+@SerialName("draw")
+data class DrawUpsertMessage(
+    val item: Drawing,
+) : DisplayMessage
+
+/**
+ * Extends a pen line that is still being drawn. Sent in 40 ms batches, like
+ * fog strokes, so the players watch the line appear rather than seeing it pop
+ * in when the finger lifts. A receiver that does not know [id] ignores it.
+ */
+@Serializable
+@SerialName("drawpts")
+data class DrawAppendMessage(
+    val id: Long,
+    val pts: List<Float>,
+) : DisplayMessage
+
+/** Removes drawings -- what the eraser sends. */
+@Serializable
+@SerialName("undraw")
+data class DrawRemoveMessage(
+    val ids: List<Long>,
+) : DisplayMessage
+
+/** Replaces every drawing at once. Sent on connect, after undo, and on clear. */
+@Serializable
+@SerialName("drawset")
+data class DrawSetMessage(
+    val items: List<Drawing>,
+) : DisplayMessage
+
 /** Hides the map behind a curtain without losing any state. */
 @Serializable
 @SerialName("blank")

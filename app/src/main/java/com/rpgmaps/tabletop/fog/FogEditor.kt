@@ -150,6 +150,15 @@ class FogEditor(val mask: FogMask) {
         return revision
     }
 
+    /**
+     * Drops the redo branch. Called when a *drawing* is made too: undo and
+     * redo walk one shared timeline across fog and drawings, and a new edit
+     * of either kind ends the old future.
+     */
+    fun clearRedo() {
+        redoStack.clear()
+    }
+
     private fun pushUndoSnapshot() {
         undoStack.addLast(mask.toPng())
         trim(undoStack)
