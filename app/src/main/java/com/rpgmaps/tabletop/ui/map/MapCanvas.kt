@@ -55,18 +55,11 @@ fun MapCanvas(
     val mapImage = viewModel.mapImage
     val fogImage = viewModel.fogImage
     val entity by viewModel.map.collectAsState()
-    val statuses by viewModel.displayStatuses.collectAsState()
 
     // The TV's aspect ratio as the map sees it, so the outline matches what it
-    // really shows. A quarter turn swaps the receiver's axes along with ours.
-    // 16:9 until a receiver tells us otherwise.
-    val rawTvAspect = statuses.firstOrNull { it.receiverW > 0 && it.receiverH > 0 }
-        ?.let { it.receiverW.toFloat() / it.receiverH.toFloat() }
-        ?: (16f / 9f)
-    // The outline shows the region the TV covers, so it follows the TV's total
-    // turn -- which includes the map turn this canvas shares.
-    val tvAspect =
-        if (viewModel.playerTotalQuarters % 2 == 0) rawTvAspect else 1f / rawTvAspect
+    // really shows. It follows the TV's total turn -- which includes the map
+    // turn this canvas shares.
+    val tvAspect = viewModel.tvAspectOnMap
 
     Box(
         modifier = modifier
@@ -94,7 +87,8 @@ fun MapCanvas(
             // This canvas follows the map turn but not the TV turn: which way
             // the artwork faces is shared, how the TV stands is not.
             val quarters = viewModel.mapRotationQuarters
-            val framing = if (quarters % 2 == 0) size.height else size.width
+            // Zoomed out, if need be, so the whole of the TV's view fits.
+            val framing = viewModel.fitExtentFor(size.width, size.height)
             val scale = framing / (2f * view.halfH.coerceAtLeast(1f))
 
             // Reads bottom-up: map centre to the origin, scale, turn, then out
