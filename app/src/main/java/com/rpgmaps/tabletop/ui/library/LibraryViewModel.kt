@@ -13,14 +13,30 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class LibraryViewModel(private val app: RpgMapsApplication) : ViewModel() {
 
     val maps: StateFlow<List<MapEntity>> = app.repository.observeMaps()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Bumped after an image is replaced, which may not change the map row at all. */
+    private val filesChanged = MutableStateFlow(0)
+
+    /**
+     * Maps listed in the library whose image file is gone. That happens after
+     * an uninstall and reinstall: Android's backup brings the library list
+     * back, but deliberately not the images, which are too large to back up.
+     */
+    val missingImages: StateFlow<Set<String>> = combine(maps, filesChanged) { list, _ -> list }
+        .mapLatest { list -> app.repository.missingImages(list.map { it.id }) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     private val _importProgress = MutableStateFlow<ImportProgress?>(null)
     val importProgress: StateFlow<ImportProgress?> = _importProgress.asStateFlow()
@@ -58,6 +74,25 @@ class LibraryViewModel(private val app: RpgMapsApplication) : ViewModel() {
                 failures.isEmpty() -> "${uris.size} maps added"
                 failures.size == uris.size -> "Could not import ${failures.joinToString()}"
                 else -> "Imported ${uris.size - failures.size}, failed: ${failures.joinToString()}"
+            }
+        }
+    }
+
+    /** Puts a newly picked image into an existing map, keeping its setup. */
+    fun replaceImage(map: MapEntity, uri: Uri) {
+        viewModelScope.launch {
+            _importProgress.value = ImportProgress(0, 1)
+            _message.value = try {
+                val maxDim = app.settings.flow.first().displayMaxDim
+                app.repository.replaceImage(map.id, uri, maxDim)
+                "Image updated for ${map.name}"
+            } catch (e: Exception) {
+                e.message ?: "Could not use that image."
+            } catch (e: OutOfMemoryError) {
+                "Ran out of memory reading that image."
+            } finally {
+                filesChanged.value++
+                _importProgress.value = null
             }
         }
     }
