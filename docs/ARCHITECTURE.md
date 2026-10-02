@@ -50,6 +50,15 @@ a rectangle, one of them would have to letterbox or crop. Instead the sender
 fixes the vertical framing and each receiver widens to its own aspect. A 16:9 TV
 shows more to the sides than a 4:3 preview, which is exactly what you want.
 
+The flip side is that the two screens do not show the same amount across. A
+16:9 TV shows more along its long side than a portrait tablet's map area, and
+that extra used to fall off the DM's canvas: to show the players the edge of
+the map, the DM had to push it under the tablet's top bar. So once a receiver
+has reported its size, the DM canvas zooms out just far enough to fit the TV's
+long side as well (`fitExtentFor`). It never changes `halfH` or anything sent
+to the TV, only how this one screen draws it, so the outline of the players'
+view always fits on the tablet.
+
 This is also what makes *scale to life* possible: the receiver reports its pixel
 size in `ReceiverHello`, the DM enters the physical diagonal, and the sender can
 compute the `halfH` that renders one battle square at one real inch.
@@ -81,7 +90,7 @@ vertical after the rotation.** At 0 and 180 degrees that is the height; at 90
 and 270 the width. That is also why turning the picture is what makes a
 landscape signal fill a TV stood on its end. Three places implement it and must
 agree: the receiver's `framing` in `draw()` and `scaleToLife`, both keyed on
-the *total*, and the DM canvas's `framingExtent`, keyed on the *map* turn
+the *total*, and the DM canvas's `fitExtentFor`, keyed on the *map* turn
 alone.
 
 The two rotate functions differ in one telling way. `rotateTv` deliberately

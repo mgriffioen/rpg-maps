@@ -268,6 +268,9 @@ class MapViewModel(
      * around whichever of its own axes is vertical after the turn, which is
      * precisely what fills a screen standing on its end.
      */
+    // The TV turning changes which way its long side runs across the map, and
+    // so how far this canvas must zoom out to keep all of it in view -- see
+    // fitExtentFor. The viewport itself, and so the TV's framing, is untouched.
     fun rotateTv(delta: Int) {
         tvRotationQuarters = (tvRotationQuarters + delta).mod(4)
         app.displayHub.setRotation(RotationMessage(playerTotalQuarters))
@@ -281,9 +284,9 @@ class MapViewModel(
      * silently change the zoom.
      */
     fun rotateMap(delta: Int) {
-        val extentBefore = framingExtent()
+        val extentBefore = fitExtentFor(canvasW, canvasH)
         mapRotationQuarters = (mapRotationQuarters + delta).mod(4)
-        val extentAfter = framingExtent()
+        val extentAfter = fitExtentFor(canvasW, canvasH)
         if (extentBefore > 0f && extentAfter > 0f) {
             applyView(view.copy(halfH = view.halfH * (extentAfter / extentBefore)))
         }
@@ -500,14 +503,6 @@ class MapViewModel(
         if (first) map.value?.let { view = fitViewFor(it, dmAspect()) }
     }
 
-    /**
-     * The screen axis that [ViewState.halfH] governs on *this* canvas. The map
-     * turn rotates this view, so under a quarter turn the map's vertical runs
-     * across the screen and the framing is set by the canvas width.
-     */
-    private fun framingExtent(): Float =
-        if (mapRotationQuarters % 2 == 0) canvasH else canvasW
-
     /** This canvas's aspect as the map sees it, i.e. after the map turn. */
     private fun dmAspect(): Float {
         val aspect =
@@ -515,8 +510,60 @@ class MapViewModel(
         return if (aspect.isFinite() && aspect > 0f) aspect else 16f / 9f
     }
 
+    /**
+     * Width over height of the players' screen as reported by the receiver,
+     * or null until one connects. Mirrored from the hub into Compose state so
+     * the canvas redraws when a TV with a different shape connects.
+     */
+    var receiverAspect by mutableStateOf<Float?>(null)
+        private set
+
+    // Declared after the property it writes: viewModelScope starts this on
+    // Main.immediate, so it runs during construction, and a StateFlow emits
+    // at once on collect.
+    init {
+        viewModelScope.launch {
+            displayStatuses.collect { list ->
+                receiverAspect = list.firstOrNull { it.receiverW > 0 && it.receiverH > 0 }
+                    ?.let { it.receiverW.toFloat() / it.receiverH.toFloat() }
+            }
+        }
+    }
+
+    /**
+     * The TV's aspect as the map sees it: how many map pixels it shows across
+     * for every one it shows vertically. A quarter turn of the player view
+     * swaps the receiver's axes. 16:9 until a receiver says otherwise.
+     */
+    val tvAspectOnMap: Float
+        get() {
+            val raw = receiverAspect ?: (16f / 9f)
+            return if (playerTotalQuarters % 2 == 0) raw else 1f / raw
+        }
+
+    /**
+     * The extent, in screen pixels of a [width] x [height] canvas, that
+     * `2 * halfH` map pixels are drawn across.
+     *
+     * Normally that is just the axis halfH governs. But both screens share
+     * halfH and each widens to its own shape, so a 16:9 TV shows more along
+     * its long side than a portrait tablet's map area does -- and that extra
+     * fell off this canvas, under the top bar, where the DM could not see what
+     * the players were looking at. So when a TV is connected the canvas also
+     * zooms out far enough for the TV's long side to fit: this view is then
+     * always a complete preview of the TV, with a little extra map beside the
+     * outline rather than TV picture missing past the edge.
+     */
+    fun fitExtentFor(width: Float, height: Float): Float {
+        val evenTurn = mapRotationQuarters % 2 == 0
+        val framing = if (evenTurn) height else width
+        if (receiverAspect == null) return framing
+        val across = if (evenTurn) width else height
+        return minOf(framing, across / tvAspectOnMap)
+    }
+
     /** Screen pixels per map pixel at the current zoom. */
-    fun scale(): Float = framingExtent() / (2f * view.halfH.coerceAtLeast(1f))
+    fun scale(): Float = fitExtentFor(canvasW, canvasH) / (2f * view.halfH.coerceAtLeast(1f))
 
     /**
      * Undoes the map turn on a screen-space delta, turning a finger movement
@@ -549,7 +596,7 @@ class MapViewModel(
         if (factor <= 0f || !factor.isFinite()) return
         val (mx, my) = screenToMap(focusX, focusY)
         val newHalfH = clampHalfH(view.halfH / factor)
-        val s = framingExtent() / (2f * newHalfH)
+        val s = fitExtentFor(canvasW, canvasH) / (2f * newHalfH)
         val (ox, oy) = unrotate((focusX - canvasW / 2f) / s, (focusY - canvasH / 2f) / s)
         applyView(ViewState(cx = mx - ox, cy = my - oy, halfH = newHalfH))
     }
