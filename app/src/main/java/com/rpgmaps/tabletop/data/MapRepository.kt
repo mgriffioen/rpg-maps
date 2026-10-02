@@ -50,6 +50,77 @@ class MapRepository(private val context: Context) {
         return entity
     }
 
+    /**
+     * Puts a new image into an existing map, keeping its name, grid
+     * calibration, fog and drawings. For a map whose files were lost -- an
+     * uninstall restores the library list from Android's backup but not the
+     * images, which are too big to back up -- this is what brings it back
+     * without recalibrating.
+     *
+     * The image goes through the normal import into a scratch map folder and
+     * its files are then moved across, so a failed import leaves the map
+     * exactly as it was.
+     *
+     * Everything stored in map pixels is scaled if the new render is a
+     * different size: the same file picked again renders identically and
+     * nothing moves, but a higher-resolution copy of the same artwork keeps
+     * the grid on its squares.
+     */
+    suspend fun replaceImage(
+        id: String,
+        uri: Uri,
+        displayMaxDim: Int = ImageImporter.DEFAULT_DISPLAY_MAX_DIM,
+    ): MapEntity {
+        val map = dao.findById(id) ?: throw ImageImporter.ImportException("That map is no longer in the library.")
+        val result = ImageImporter.import(context, uri, displayMaxDim)
+
+        withContext(Dispatchers.IO) {
+            val scratch = MapFiles(context, result.id)
+            val target = MapFiles(context, id)
+            try {
+                target.ensureDir()
+                for (name in listOf(scratch.source, scratch.display, scratch.thumb)) {
+                    val dest = File(target.dir, name.name)
+                    if (!name.renameTo(dest)) {
+                        name.copyTo(dest, overwrite = true)
+                    }
+                }
+            } finally {
+                scratch.deleteAll()
+            }
+        }
+
+        val scale = if (map.imageW > 0) result.imageW.toFloat() / map.imageW else 1f
+        if (scale != 1f) {
+            val drawings = readDrawings(id)
+            if (drawings.isNotEmpty()) {
+                writeDrawings(
+                    id,
+                    drawings.map { d -> d.copy(width = d.width * scale, pts = d.pts.map { it * scale }) },
+                )
+            }
+        }
+
+        // The fog mask is kept as it is: it is stored at its own resolution
+        // and FogMask.restoreFrom stretches it onto the new fog size.
+        val updated = map.copy(
+            imageW = result.imageW,
+            imageH = result.imageH,
+            fogW = result.fogW,
+            fogH = result.fogH,
+            pxPerSquare = map.pxPerSquare * scale,
+            gridOffsetX = map.gridOffsetX * scale,
+            gridOffsetY = map.gridOffsetY * scale,
+        )
+        dao.update(updated)
+        return updated
+    }
+
+    /** Ids of maps whose display image is gone from disk. */
+    suspend fun missingImages(ids: List<String>): Set<String> = withContext(Dispatchers.IO) {
+        ids.filterTo(HashSet()) { !MapFiles(context, it).display.exists() }
+    }
+
     /** Appends " 2", " 3", ... when a map of the same name already exists. */
     private suspend fun uniqueName(base: String): String {
         val existing = dao.allNames().toSet()

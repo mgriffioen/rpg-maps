@@ -2,6 +2,7 @@ package com.rpgmaps.tabletop.ui.library
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.ImageNotSupported
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -66,6 +69,7 @@ fun LibraryScreen(
     val maps by viewModel.maps.collectAsState()
     val importProgress by viewModel.importProgress.collectAsState()
     val message by viewModel.message.collectAsState()
+    val missingImages by viewModel.missingImages.collectAsState()
 
     val snackbars = remember { SnackbarHostState() }
     var renaming by remember { mutableStateOf<MapEntity?>(null) }
@@ -76,6 +80,21 @@ fun LibraryScreen(
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris -> viewModel.import(uris) }
+
+    // The map a picked image is for. Held outside the launcher because the
+    // result callback only receives the URI.
+    var replacing by remember { mutableStateOf<MapEntity?>(null) }
+    val replacePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        val map = replacing
+        replacing = null
+        if (uri != null && map != null) viewModel.replaceImage(map, uri)
+    }
+    fun chooseImageFor(map: MapEntity) {
+        replacing = map
+        replacePicker.launch(arrayOf("image/*"))
+    }
 
     LaunchedEffect(message) {
         message?.let {
@@ -126,9 +145,14 @@ fun LibraryScreen(
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(maps, key = { it.id }) { map ->
+                        val missing = map.id in missingImages
                         MapCard(
                             map = map,
-                            onOpen = { onOpenMap(map.id) },
+                            missing = missing,
+                            // Opening a map with no image only shows an
+                            // error, so go straight to fixing it instead.
+                            onOpen = { if (missing) chooseImageFor(map) else onOpenMap(map.id) },
+                            onChooseImage = { chooseImageFor(map) },
                             onRename = { renaming = map },
                             onDelete = { deleting = map },
                         )
@@ -165,7 +189,9 @@ fun LibraryScreen(
 @Composable
 private fun MapCard(
     map: MapEntity,
+    missing: Boolean,
     onOpen: () -> Unit,
+    onChooseImage: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -174,14 +200,18 @@ private fun MapCard(
 
     Card(Modifier.clickable(onClick = onOpen)) {
         Column {
-            AsyncImage(
-                model = MapFiles(context, map.id).thumb,
-                contentDescription = map.name,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(4f / 3f),
-            )
+            if (missing) {
+                MissingImage(Modifier.fillMaxWidth().aspectRatio(4f / 3f))
+            } else {
+                AsyncImage(
+                    model = MapFiles(context, map.id).thumb,
+                    contentDescription = map.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(4f / 3f),
+                )
+            }
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -208,6 +238,11 @@ private fun MapCard(
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
+                            text = { Text(if (missing) "Choose image" else "Replace image") },
+                            leadingIcon = { Icon(Icons.Default.Image, null) },
+                            onClick = { menuOpen = false; onChooseImage() },
+                        )
+                        DropdownMenuItem(
                             text = { Text("Rename") },
                             leadingIcon = { Icon(Icons.Default.Edit, null) },
                             onClick = { menuOpen = false; onRename() },
@@ -221,6 +256,39 @@ private fun MapCard(
                 }
             }
         }
+    }
+}
+
+/**
+ * Stands in for the thumbnail of a map whose image is gone, and says what
+ * tapping it does: the name and calibration survived, only the picture needs
+ * choosing again.
+ */
+@Composable
+private fun MissingImage(modifier: Modifier) {
+    Column(
+        modifier
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(
+            Icons.Default.ImageNotSupported,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            "Image missing",
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        Text(
+            "Tap to choose it again. The name and grid are kept.",
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

@@ -13,6 +13,9 @@ middle of the table as the battle map.
 
 - **Map library.** Import battle map images from anywhere on the tablet, Drive
   or Downloads. They are copied onto the device, so a session needs no internet.
+  If a map's image ever goes missing -- say after reinstalling the app -- tap
+  it to choose the image again; its name, grid calibration, fog and drawings
+  are kept.
 - **Pan and zoom.** One finger to drag, two to pinch. Works the same whether
   you're framing a whole dungeon level or one corner of a room.
 - **Fog of war.** Paint with your finger or a stylus to reveal, or drag out a
