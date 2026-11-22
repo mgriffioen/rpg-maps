@@ -47,6 +47,7 @@ class LanSink(
     private var server: LanServer? = null
     private var pingJob: Job? = null
     private var writerJob: Job? = null
+    private val advertiser = LanAdvertiser(context)
 
     /**
      * Outbound queue, drained by exactly one coroutine on [Dispatchers.IO].
@@ -91,6 +92,7 @@ class LanSink(
                 )
                 startWriter()
                 startPinging()
+                advertiser.advertise(port)
                 return
             } catch (e: IOException) {
                 lastError = e
@@ -107,6 +109,7 @@ class LanSink(
     }
 
     override fun stop() {
+        advertiser.withdraw()
         pingJob?.cancel()
         pingJob = null
         writerJob?.cancel()

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Black from the very first frame, so launching never flashes white. -->
+    <style name="Theme.Player" parent="android:Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:colorAccent">#E0B354</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+</resources>
