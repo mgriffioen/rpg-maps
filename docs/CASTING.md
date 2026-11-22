@@ -26,7 +26,11 @@ Devices that work well:
 
 - **A laptop plugged into the TV over HDMI.** Open the URL, press F11 for full
   screen. Honestly the most reliable setup there is.
-- **An Android TV / Google TV / Fire TV.** Install a browser and open the URL.
+- **A Fire TV stick or Android TV / Google TV.** Install the RPG Maps Player
+  app from this repository: completely full screen, no screensaver, and it
+  finds the tablet without anyone typing the address. See
+  [TV-PLAYER.md](TV-PLAYER.md). (A TV browser also works, but browsers on TV
+  sticks rarely go fully full screen.)
 - **A spare tablet or old phone** propped under the TV. Works, but you have a
   TV, so use the TV.
 
@@ -184,6 +188,6 @@ touching anything else. It is not implemented yet.
 Given an older Chromecast dongle: **do route 1 first** to confirm the app works
 and to get a feel for the fog tools, then set up route 2 for actual play.
 
-If you ever replace the dongle, a Google TV Streamer or any Android TV can just
-open the local-network URL in a browser, and route 2 stops being necessary at
-all.
+If you have a Fire TV stick or any Android TV, use the
+[TV player app](TV-PLAYER.md) instead: it is route 1 with no browser and no
+setup on the tablet, and route 2 stops being necessary at all.

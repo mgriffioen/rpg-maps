@@ -66,12 +66,13 @@ command-line and `adb` routes.
 
 ## Getting it onto the TV
 
-There are three ways, and they are very different amounts of work. Full detail
+There are a few ways, and they are very different amounts of work. Full detail
 in **[docs/CASTING.md](docs/CASTING.md)**.
 
 | Route | Setup needed | Notes |
 |---|---|---|
 | **Local network** | None | Open the address the app shows in any browser on a device attached to the TV. Start here — it proves everything works before you touch Cast. |
+| **Fire TV / Android TV app** | Install one APK on the TV stick | The local-network route without a browser: completely full screen, no screensaver, and it finds the tablet by itself. See **[docs/TV-PLAYER.md](docs/TV-PLAYER.md)**. |
 | **Chromecast** | Google Cast developer registration ($5, one-off) + GitHub Pages | Needed for older Chromecast dongles, which cannot run apps of their own. |
 | **HDMI cable** | None | Mirrors the tablet. Simple, but the players see your controls too. |
 
@@ -91,6 +92,8 @@ app/                     the Android app (Kotlin, Jetpack Compose)
       cast/              Google Cast sender
     ui/                  Compose screens
   src/test/              JVM unit tests (./gradlew test)
+tv/                      the TV player app for Fire TV / Android TV: a
+                         full-screen WebView that finds the tablet over mDNS
 receiver/index.html      the player view — one file, runs on Chromecast and in
                          any browser. Bundled into the APK at build time and
                          served from GitHub Pages for Cast.

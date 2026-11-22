@@ -22,3 +22,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "RpgMaps"
 include(":app")
+include(":tv")

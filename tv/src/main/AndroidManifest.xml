@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Finding the tablet is mDNS, which needs multicast on the Wi-Fi radio. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- Holding a WifiLock, so Wi-Fi power saving never delays a fog reveal. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- A TV app: no touchscreen, and it belongs in the TV launcher. -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+
+    <!-- usesCleartextTraffic: the tablet serves plain HTTP on the local
+         network, and without this Android 9+ refuses to load it.
+         enableOnBackInvokedCallback="false": Back opens the menu rather than
+         leaving, which predictive back (default for API 36) would bypass. -->
+    <application
+        android:allowBackup="false"
+        android:banner="@drawable/banner"
+        android:enableOnBackInvokedCallback="false"
+        android:icon="@drawable/icon"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Player"
+        android:usesCleartextTraffic="true"
+        tools:targetApi="33">
+
+        <!-- configChanges: a WebView must not be torn down when the TV
+             reports a resolution or HDMI change, or the map disappears. -->
+        <activity
+            android:name=".PlayerActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="landscape">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
