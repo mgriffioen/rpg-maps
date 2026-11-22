@@ -9,6 +9,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.rpgmaps.tabletop.RpgMapsApplication
 import com.rpgmaps.tabletop.data.FolderTree
+import com.rpgmaps.tabletop.data.LibrarySort
 import com.rpgmaps.tabletop.data.db.FolderEntity
 import com.rpgmaps.tabletop.data.db.MapEntity
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -30,6 +32,14 @@ class LibraryViewModel(private val app: RpgMapsApplication) : ViewModel() {
 
     val folders: StateFlow<List<FolderEntity>> = app.repository.observeFolders()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Remembered between sessions, like the display settings. */
+    val sort: StateFlow<LibrarySort> = app.settings.flow.map { it.librarySort }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibrarySort.DEFAULT)
+
+    fun selectSort(sort: LibrarySort) {
+        viewModelScope.launch { app.settings.setLibrarySort(sort) }
+    }
 
     private val _openFolderId = MutableStateFlow<String?>(null)
 
