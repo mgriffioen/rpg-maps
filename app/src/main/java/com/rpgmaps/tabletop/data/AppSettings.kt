@@ -44,6 +44,8 @@ class AppSettings(private val context: Context) {
         val drawColor: String = DEFAULT_DRAW_COLOR,
         /** Screen pixels on the DM's canvas at the moment a line is drawn. */
         val drawWidth: Float = DEFAULT_DRAW_WIDTH,
+        /** Order of maps and folders in the library. */
+        val librarySort: LibrarySort = LibrarySort.DEFAULT,
     )
 
     val flow: Flow<Snapshot> = context.settingsStore.data.map { p ->
@@ -58,6 +60,7 @@ class AppSettings(private val context: Context) {
             mapRotationQuarters = (p[KEY_MAP_ROTATION] ?: 0).mod(4),
             drawColor = p[KEY_DRAW_COLOR] ?: DEFAULT_DRAW_COLOR,
             drawWidth = p[KEY_DRAW_WIDTH] ?: DEFAULT_DRAW_WIDTH,
+            librarySort = LibrarySort.fromKey(p[KEY_LIBRARY_SORT]),
         )
     }
 
@@ -71,6 +74,8 @@ class AppSettings(private val context: Context) {
     suspend fun setMapRotationQuarters(value: Int) = put(KEY_MAP_ROTATION, value.mod(4))
     suspend fun setDrawColor(value: String) = put(KEY_DRAW_COLOR, value)
     suspend fun setDrawWidth(value: Float) = put(KEY_DRAW_WIDTH, value)
+    // Stored by name, so reordering the enum cannot change anyone's choice.
+    suspend fun setLibrarySort(value: LibrarySort) = put(KEY_LIBRARY_SORT, value.name)
 
     private suspend fun <T> put(key: Preferences.Key<T>, value: T) {
         context.settingsStore.edit { it[key] = value }
@@ -94,5 +99,6 @@ class AppSettings(private val context: Context) {
         private val KEY_MAP_ROTATION = intPreferencesKey("map_rotation_quarters")
         private val KEY_DRAW_COLOR = stringPreferencesKey("draw_color")
         private val KEY_DRAW_WIDTH = floatPreferencesKey("draw_width")
+        private val KEY_LIBRARY_SORT = stringPreferencesKey("library_sort")
     }
 }

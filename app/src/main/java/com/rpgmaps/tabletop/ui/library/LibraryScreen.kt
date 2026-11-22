@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Folder
@@ -75,6 +76,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.rpgmaps.tabletop.data.FolderTree
+import com.rpgmaps.tabletop.data.LibrarySort
 import com.rpgmaps.tabletop.data.MapFiles
 import com.rpgmaps.tabletop.data.db.FolderEntity
 import com.rpgmaps.tabletop.data.db.MapEntity
@@ -90,6 +92,7 @@ fun LibraryScreen(
     val allMaps by viewModel.maps.collectAsState()
     val allFolders by viewModel.folders.collectAsState()
     val openFolderId by viewModel.openFolderId.collectAsState()
+    val sort by viewModel.sort.collectAsState()
     val importProgress by viewModel.importProgress.collectAsState()
     val message by viewModel.message.collectAsState()
     val missingImages by viewModel.missingImages.collectAsState()
@@ -105,8 +108,8 @@ fun LibraryScreen(
 
     // What is directly inside the folder being browsed.
     val path = FolderTree.path(allFolders, openFolderId)
-    val maps = allMaps.filter { it.folderId == openFolderId }
-    val folders = allFolders.filter { it.parentId == openFolderId }
+    val maps = sort.sortMaps(allMaps.filter { it.folderId == openFolderId })
+    val folders = sort.sortFolders(allFolders.filter { it.parentId == openFolderId }, allFolders, allMaps)
 
     // Back steps out of a folder before it leaves the library.
     BackHandler(enabled = openFolderId != null) { viewModel.openParentFolder() }
@@ -158,6 +161,7 @@ fun LibraryScreen(
                     }
                 },
                 actions = {
+                    SortMenu(current = sort, onSelect = viewModel::selectSort)
                     IconButton(onClick = { creatingFolder = true }) {
                         Icon(Icons.Default.CreateNewFolder, contentDescription = "New folder")
                     }
@@ -404,6 +408,38 @@ private fun MapCard(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+/** The sort button in the top bar and its menu, with the current order ticked. */
+@Composable
+private fun SortMenu(current: LibrarySort, onSelect: (LibrarySort) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort by ${current.label.lowercase()}")
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            Text(
+                "Sort by",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            for (option in LibrarySort.entries) {
+                DropdownMenuItem(
+                    text = { Text(option.label) },
+                    leadingIcon = {
+                        if (option == current) {
+                            Icon(Icons.Default.Check, contentDescription = "Selected")
+                        } else {
+                            Spacer(Modifier.size(24.dp))
+                        }
+                    },
+                    onClick = { open = false; onSelect(option) },
+                )
             }
         }
     }

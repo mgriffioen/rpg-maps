@@ -20,6 +20,9 @@ middle of the table as the battle map.
   with a folder per chapter inside. Maps you add go into the folder you are
   looking at; *Move to folder* in a map's or folder's menu files it anywhere
   else. Deleting a folder never deletes maps: what was inside moves up a level.
+- **Sort.** Order the library by name, latest used or date added from the
+  sort button at the top. Folders sort the same way -- by latest used, a folder
+  counts as used when any map inside it was -- and the choice is remembered.
 - **Pan and zoom.** One finger to drag, two to pinch. Works the same whether
   you're framing a whole dungeon level or one corner of a room.
 - **Fog of war.** Paint with your finger or a stylus to reveal, or drag out a
