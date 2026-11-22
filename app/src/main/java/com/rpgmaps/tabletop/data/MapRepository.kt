@@ -4,7 +4,10 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import androidx.room.withTransaction
 import com.rpgmaps.tabletop.data.db.AppDatabase
+import com.rpgmaps.tabletop.data.db.FolderDao
+import com.rpgmaps.tabletop.data.db.FolderEntity
 import com.rpgmaps.tabletop.data.db.MapDao
 import com.rpgmaps.tabletop.data.db.MapEntity
 import com.rpgmaps.tabletop.display.protocol.DisplayJson
@@ -14,6 +17,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import java.io.File
+import java.util.UUID
 
 /**
  * The library: map metadata in Room, map pixels on disk.
@@ -23,7 +27,9 @@ import java.io.File
  */
 class MapRepository(private val context: Context) {
 
-    private val dao: MapDao = AppDatabase.get(context).mapDao()
+    private val db: AppDatabase = AppDatabase.get(context)
+    private val dao: MapDao = db.mapDao()
+    private val folderDao: FolderDao = db.folderDao()
 
     fun observeMaps(): Flow<List<MapEntity>> = dao.observeAll()
 
@@ -35,8 +41,12 @@ class MapRepository(private val context: Context) {
 
     // --- library management ---------------------------------------------
 
-    /** Imports a picked image and returns the stored map. */
-    suspend fun importMap(uri: Uri, displayMaxDim: Int = ImageImporter.DEFAULT_DISPLAY_MAX_DIM): MapEntity {
+    /** Imports a picked image into [folderId] (null: the top level) and returns the stored map. */
+    suspend fun importMap(
+        uri: Uri,
+        displayMaxDim: Int = ImageImporter.DEFAULT_DISPLAY_MAX_DIM,
+        folderId: String? = null,
+    ): MapEntity {
         val result = ImageImporter.import(context, uri, displayMaxDim)
         val entity = MapEntity(
             id = result.id,
@@ -45,6 +55,7 @@ class MapRepository(private val context: Context) {
             imageH = result.imageH,
             fogW = result.fogW,
             fogH = result.fogH,
+            folderId = folderId,
         )
         dao.insert(entity)
         return entity
@@ -137,6 +148,51 @@ class MapRepository(private val context: Context) {
     suspend fun delete(id: String) = withContext(Dispatchers.IO) {
         dao.delete(id)
         MapFiles(context, id).deleteAll()
+    }
+
+    suspend fun moveMap(id: String, folderId: String?) = dao.moveToFolder(id, folderId)
+
+    // --- folders ---------------------------------------------------------
+
+    fun observeFolders(): Flow<List<FolderEntity>> = folderDao.observeAll()
+
+    suspend fun createFolder(name: String, parentId: String?): FolderEntity {
+        val folder = FolderEntity(
+            id = UUID.randomUUID().toString(),
+            name = name.trim().ifEmpty { "New folder" },
+            parentId = parentId,
+        )
+        folderDao.insert(folder)
+        return folder
+    }
+
+    suspend fun renameFolder(id: String, name: String) {
+        folderDao.rename(id, name.trim().ifEmpty { "Folder" })
+    }
+
+    /**
+     * Moves a folder into [parentId]. Refused -- returns false -- if that is
+     * the folder itself or somewhere inside it, which would cut the folder
+     * off from the rest of the library.
+     */
+    suspend fun moveFolder(id: String, parentId: String?): Boolean = db.withTransaction {
+        if (parentId != null && FolderTree.isWithin(folderDao.all(), parentId, id)) {
+            return@withTransaction false
+        }
+        folderDao.move(id, parentId)
+        true
+    }
+
+    /**
+     * Deletes a folder but none of its contents: its maps and subfolders
+     * move up into the folder it was in. Deleting a map is a separate,
+     * deliberate act, because it loses the fog and calibration with it.
+     */
+    suspend fun deleteFolder(id: String) = db.withTransaction {
+        val folder = folderDao.findById(id) ?: return@withTransaction
+        dao.reparentMaps(id, folder.parentId)
+        folderDao.reparentChildren(id, folder.parentId)
+        folderDao.delete(id)
     }
 
     suspend fun markOpened(id: String) = dao.touch(id, System.currentTimeMillis())
