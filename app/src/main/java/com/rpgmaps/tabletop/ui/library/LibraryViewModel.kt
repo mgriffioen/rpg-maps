@@ -8,6 +8,8 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.rpgmaps.tabletop.RpgMapsApplication
+import com.rpgmaps.tabletop.data.FolderTree
+import com.rpgmaps.tabletop.data.db.FolderEntity
 import com.rpgmaps.tabletop.data.db.MapEntity
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -25,6 +27,29 @@ class LibraryViewModel(private val app: RpgMapsApplication) : ViewModel() {
 
     val maps: StateFlow<List<MapEntity>> = app.repository.observeMaps()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val folders: StateFlow<List<FolderEntity>> = app.repository.observeFolders()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val _openFolderId = MutableStateFlow<String?>(null)
+
+    /**
+     * The folder being browsed, or null for the top level. Kept here rather
+     * than in the screen so it survives rotation and coming back from a map.
+     */
+    val openFolderId: StateFlow<String?> = _openFolderId.asStateFlow()
+
+    /** Shows the contents of [folderId]; null goes back to the top level. */
+    fun openFolder(folderId: String?) {
+        _openFolderId.value = folderId
+    }
+
+    /** Goes up one level. Returns false when already at the top. */
+    fun openParentFolder(): Boolean {
+        val current = _openFolderId.value ?: return false
+        _openFolderId.value = folders.value.firstOrNull { it.id == current }?.parentId
+        return true
+    }
 
     /** Bumped after an image is replaced, which may not change the map row at all. */
     private val filesChanged = MutableStateFlow(0)
@@ -53,6 +78,8 @@ class LibraryViewModel(private val app: RpgMapsApplication) : ViewModel() {
      */
     fun import(uris: List<Uri>) {
         if (uris.isEmpty()) return
+        // Captured now, so browsing elsewhere mid-import does not split a batch.
+        val folderId = _openFolderId.value
         viewModelScope.launch {
             val maxDim = app.settings.flow.first().displayMaxDim
             val failures = mutableListOf<String>()
@@ -60,7 +87,7 @@ class LibraryViewModel(private val app: RpgMapsApplication) : ViewModel() {
             uris.forEachIndexed { index, uri ->
                 _importProgress.value = ImportProgress(index, uris.size)
                 try {
-                    app.repository.importMap(uri, maxDim)
+                    app.repository.importMap(uri, maxDim, folderId)
                 } catch (e: Exception) {
                     failures += (uri.lastPathSegment ?: "one file")
                 } catch (e: OutOfMemoryError) {
@@ -107,6 +134,49 @@ class LibraryViewModel(private val app: RpgMapsApplication) : ViewModel() {
             _message.value = "Deleted ${map.name}"
         }
     }
+
+    fun moveMap(map: MapEntity, folderId: String?) {
+        viewModelScope.launch {
+            app.repository.moveMap(map.id, folderId)
+            _message.value = "Moved ${map.name} to ${folderName(folderId)}"
+        }
+    }
+
+    // --- folders ---------------------------------------------------------
+
+    /** Makes a folder inside the one being browsed. */
+    fun createFolder(name: String) {
+        val parentId = _openFolderId.value
+        viewModelScope.launch { app.repository.createFolder(name, parentId) }
+    }
+
+    fun renameFolder(id: String, name: String) {
+        viewModelScope.launch { app.repository.renameFolder(id, name) }
+    }
+
+    fun moveFolder(folder: FolderEntity, parentId: String?) {
+        viewModelScope.launch {
+            _message.value = if (app.repository.moveFolder(folder.id, parentId)) {
+                "Moved ${folder.name} to ${folderName(parentId)}"
+            } else {
+                "A folder cannot go inside itself."
+            }
+        }
+    }
+
+    fun deleteFolder(folder: FolderEntity) {
+        viewModelScope.launch {
+            // Step out first if the open folder is the one going, or inside it.
+            if (FolderTree.isWithin(folders.value, _openFolderId.value, folder.id)) {
+                _openFolderId.value = folder.parentId
+            }
+            app.repository.deleteFolder(folder.id)
+            _message.value = "Deleted folder ${folder.name}"
+        }
+    }
+
+    private fun folderName(id: String?): String =
+        id?.let { folders.value.firstOrNull { f -> f.id == it }?.name } ?: "the library"
 
     fun consumeMessage() {
         _message.value = null

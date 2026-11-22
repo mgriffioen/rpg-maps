@@ -31,6 +31,9 @@ data class MapEntity(
     @ColumnInfo(defaultValue = "0") val gridOffsetY: Float = 0f,
     @ColumnInfo(defaultValue = "0") val gridEnabled: Boolean = false,
 
+    /** The [FolderEntity] this map is filed in, or null for the top level. */
+    val folderId: String? = null,
+
     val createdAt: Long = System.currentTimeMillis(),
     val lastOpenedAt: Long = 0L,
 )

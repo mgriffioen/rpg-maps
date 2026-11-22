@@ -16,6 +16,10 @@ middle of the table as the battle map.
   If a map's image ever goes missing -- say after reinstalling the app -- tap
   it to choose the image again; its name, grid calibration, fog and drawings
   are kept.
+- **Folders.** Organise the library into folders -- one per campaign, say,
+  with a folder per chapter inside. Maps you add go into the folder you are
+  looking at; *Move to folder* in a map's or folder's menu files it anywhere
+  else. Deleting a folder never deletes maps: what was inside moves up a level.
 - **Pan and zoom.** One finger to drag, two to pinch. Works the same whether
   you're framing a whole dungeon level or one corner of a room.
 - **Fog of war.** Paint with your finger or a stylus to reveal, or drag out a

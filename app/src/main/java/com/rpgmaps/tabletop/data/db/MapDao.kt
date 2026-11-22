@@ -35,6 +35,13 @@ interface MapDao {
     @Query("UPDATE maps SET lastOpenedAt = :at WHERE id = :id")
     suspend fun touch(id: String, at: Long)
 
+    @Query("UPDATE maps SET folderId = :folderId WHERE id = :id")
+    suspend fun moveToFolder(id: String, folderId: String?)
+
+    /** Moves every map directly inside [fromId] into [toId]. */
+    @Query("UPDATE maps SET folderId = :toId WHERE folderId = :fromId")
+    suspend fun reparentMaps(fromId: String, toId: String?)
+
     @Query("DELETE FROM maps WHERE id = :id")
     suspend fun delete(id: String)
 }
