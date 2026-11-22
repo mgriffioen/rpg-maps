@@ -13,9 +13,22 @@ import android.util.Log
  * Browsers ignore this entirely; typing the address still works as before.
  * Failing to advertise is never fatal: it is logged and the server carries on.
  */
-class LanAdvertiser(context: Context) {
+class LanAdvertiser(private val context: Context) {
 
-    private val nsd = context.applicationContext.getSystemService(Context.NSD_SERVICE) as NsdManager?
+    /**
+     * Looked up on first use, never in the constructor. LanSink -- and so this
+     * -- is built in RpgMapsApplication's field initialisers, before Android
+     * has attached the application's base context; touching the context then
+     * throws a NullPointerException and the app dies on every launch.
+     */
+    private val nsd: NsdManager? by lazy {
+        try {
+            context.applicationContext.getSystemService(Context.NSD_SERVICE) as NsdManager?
+        } catch (e: Exception) {
+            Log.w(TAG, "no NsdManager", e)
+            null
+        }
+    }
     private var listener: NsdManager.RegistrationListener? = null
 
     fun advertise(port: Int) {
