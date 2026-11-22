@@ -95,6 +95,16 @@ to a prerelease tagged `latest-debug`. On the tablet, go to the repository's
 extracting. The URL is stable, so bookmark it; re-running the workflow replaces
 the file at the same address.
 
+The direct link is:
+
+```
+https://github.com/mgriffioen/rpg-maps/releases/download/latest-debug/app-debug.apk
+```
+
+Or install the free **Downloader** app (by AFTVnews) from the Play Store and
+type the code **`2967767`**, which points at that link. (The TV player app has
+its own code, `6801976`; see [TV-PLAYER.md](TV-PLAYER.md).)
+
 > The workflow runs the unit tests before assembling, so if something is
 > broken you get a file and line number in the log rather than a crash on the
 > tablet.

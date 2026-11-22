@@ -72,7 +72,7 @@ in **[docs/CASTING.md](docs/CASTING.md)**.
 | Route | Setup needed | Notes |
 |---|---|---|
 | **Local network** | None | Open the address the app shows in any browser on a device attached to the TV. Start here — it proves everything works before you touch Cast. |
-| **Fire TV / Android TV app** | Install one APK on the TV stick | The local-network route without a browser: completely full screen, no screensaver, and it finds the tablet by itself. See **[docs/TV-PLAYER.md](docs/TV-PLAYER.md)**. |
+| **Fire TV / Android TV app** | Install one APK on the TV stick | The local-network route without a browser: completely full screen, no screensaver, and it finds the tablet by itself. Install with Downloader code **6801976**; see **[docs/TV-PLAYER.md](docs/TV-PLAYER.md)**. |
 | **Chromecast** | Google Cast developer registration ($5, one-off) + GitHub Pages | Needed for older Chromecast dongles, which cannot run apps of their own. |
 | **HDMI cable** | None | Mirrors the tablet. Simple, but the players see your controls too. |
 
