@@ -52,16 +52,19 @@ You do this once. Updates install over the top the same way.
 1. From the Amazon app store, install **Downloader** (by AFTVnews), the
    standard free tool for this.
 2. Back in Developer options → Install unknown apps, turn **Downloader** on.
-3. Open Downloader and type the release address:
+3. Open Downloader and type the code **`6801976`** in the address box, then
+   press Go.
+
+   The code points at the release address, which you can also type in full:
 
    ```
    https://github.com/mgriffioen/rpg-maps/releases/download/latest-debug/rpg-maps-tv-player-debug.apk
    ```
 
-   This file exists once the **Build APK** workflow has been run by hand
-   from the Actions tab, the same as for the tablet app (see
-   [INSTALL.md](INSTALL.md)). The address never changes, so Downloader
-   remembers it for updates.
+   It always gives the newest build published by running the **Build APK**
+   workflow by hand from the Actions tab, the same as for the tablet app (see
+   [INSTALL.md](INSTALL.md)). Neither the code nor the address changes
+   between builds.
 
 4. Downloader offers **Install** when the download finishes. Afterwards,
    choose **Delete** to free up the space the file took.
@@ -69,6 +72,9 @@ You do this once. Updates install over the top the same way.
 **RPG Maps Player** is now under *Your Apps & Channels*. Long-press the select
 button on it and pick *Move* to put it on the home row.
 
+> **To update later**, run Downloader again with `6801976`. The new build
+> installs over the old one, keeping the saved tablet address.
+>
 > **With a computer instead:** turn on *ADB debugging* in Developer options,
 > then `adb connect <fire-tv-ip>` and
 > `adb install -r rpg-maps-tv-player-debug.apk`. The Fire TV's IP is under
