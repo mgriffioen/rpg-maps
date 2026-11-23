@@ -499,8 +499,12 @@ function draw() {
   ctx.scale(scale, scale);
   ctx.translate(-view.cx, -view.cy);
 
+  // 'medium', not 'high'. Measured on a Fire TV Stick 4K (WebView 118) with a
+  // 1448x1086 map at 1.35x: 'high' ran at 5 fps (484 ms worst frame), 'medium'
+  // at 42 fps (50 ms). The map is almost always magnified, where 'high' looks
+  // no different -- it only earns its cost when shrinking an image.
   ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
+  ctx.imageSmoothingQuality = 'medium';
   ctx.drawImage(state.image, 0, 0, state.map.imageW, state.map.imageH);
 
   if (state.grid.enabled && state.grid.pxPerSquare > 2) {
