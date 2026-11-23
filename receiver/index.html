@@ -112,7 +112,6 @@ function resize() {
     stage.width = w;
     stage.height = h;
     transport.announce();
-    invalidate();
   }
 }
 window.addEventListener('resize', resize);
@@ -297,7 +296,6 @@ function restoreFogFromPng(base64) {
     g.globalCompositeOperation = 'copy';
     g.drawImage(img, 0, 0, state.fog.width, state.fog.height);
     g.restore();
-    invalidate();
   };
   img.src = 'data:image/png;base64,' + base64;
 }
@@ -399,8 +397,6 @@ function handle(msg) {
   }
 
   idleEl.classList.toggle('hidden', !!(state.map && state.image));
-  // Every message changes something on screen, or might: redraw once.
-  invalidate();
 }
 
 function findDrawing(id) {
@@ -446,7 +442,6 @@ function loadImage(src, revision) {
     state.image = img;
     state.imageRevision = revision;
     idleEl.classList.add('hidden');
-    invalidate();
   };
   img.onerror = function () {
     idleHint.textContent = 'Could not load the map image.';
@@ -464,41 +459,10 @@ function argbToCss(argb) {
   return '#' + s;
 }
 
-/*
- * Redraw on demand, not every frame.
- *
- * A frame here is a full-screen fill, the whole map image scaled with
- * high-quality smoothing, and the whole fog mask composited on top. A desktop
- * shrugs that off 60 times a second; a Fire TV stick took about 450 ms a frame
- * and spent the session at 2 fps doing it for a map that was standing still.
- *
- * So the canvas is only repainted when something changed (a message, a
- * resize, an image or fog mask finishing loading), and keeps repainting only
- * while something is actually moving: the viewport easing towards its target,
- * or a ping pulsing. Otherwise no frames are scheduled at all.
- */
-var dirty = false;
-var dirtySince = 0;
-var framePending = false;
-
-function invalidate() {
-  if (!dirty) {
-    dirty = true;
-    dirtySince = Date.now();
-  }
-  if (!framePending) {
-    framePending = true;
-    requestAnimationFrame(onFrame);
-  }
-}
-
-function onFrame() {
-  framePending = false;
-  if (dirty) draw();
-}
+var lastDrawAt = 0;
 
 function draw() {
-  dirty = false;
+  lastDrawAt = Date.now();
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = '#000';
@@ -519,8 +483,6 @@ function draw() {
     if (Math.abs(t.cx - v.cx) < 0.5) v.cx = t.cx;
     if (Math.abs(t.cy - v.cy) < 0.5) v.cy = t.cy;
     if (Math.abs(t.halfH - v.halfH) < 0.5) v.halfH = t.halfH;
-    // Still gliding: ask for the next step.
-    if (v.cx !== t.cx || v.cy !== t.cy || v.halfH !== t.halfH) invalidate();
   }
 
   var view = state.view;
@@ -537,12 +499,8 @@ function draw() {
   ctx.scale(scale, scale);
   ctx.translate(-view.cx, -view.cy);
 
-  // 'medium', not 'high'. Measured on a Fire TV Stick 4K (WebView 118) with a
-  // 1448x1086 map at 1.35x: 'high' ran at 5 fps (484 ms worst frame), 'medium'
-  // at 42 fps (50 ms). The map is almost always magnified, where 'high' looks
-  // no different -- it only earns its cost when shrinking an image.
   ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'medium';
+  ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(state.image, 0, 0, state.map.imageW, state.map.imageH);
 
   if (state.grid.enabled && state.grid.pxPerSquare > 2) {
@@ -687,8 +645,11 @@ function drawMarks(halfH) {
 
   ctx.globalAlpha = 1;
   state.marks = alive;
-  // A ping animates for its whole life, so keep frames coming until it ends.
-  if (alive.length) invalidate();
+}
+
+function frameLoop() {
+  requestAnimationFrame(frameLoop);
+  draw();
 }
 
 /*
@@ -699,12 +660,11 @@ function drawMarks(halfH) {
  *
  * This watchdog redraws on a plain timer whenever rAF has stalled. Timers get
  * throttled too, but only to about 1 Hz, which keeps reveals appearing instead
- * of freezing. It only acts when a redraw is owed and rAF has not delivered it,
- * so an idle page stays idle. It deliberately does not re-arm rAF: that frame
- * is still pending, just slow.
+ * of freezing. It deliberately does not re-arm rAF: that chain is still
+ * pending, just slow.
  */
 setInterval(function () {
-  if (dirty && Date.now() - dirtySince > 700) draw();
+  if (Date.now() - lastDrawAt > 700) draw();
 }, 500);
 
 function drawGrid(scale) {
@@ -949,7 +909,7 @@ function startSocketTransport() {
 /* ----------------------------- boot ------------------------------- */
 
 resize();
-invalidate();
+requestAnimationFrame(frameLoop);
 
 // A Chromecast always identifies itself with "CrKey". `?mode=cast` is an
 // escape hatch for testing the Cast path in a desktop browser.
