@@ -112,6 +112,7 @@ function resize() {
     stage.width = w;
     stage.height = h;
     transport.announce();
+    invalidate();
   }
 }
 window.addEventListener('resize', resize);
@@ -296,6 +297,7 @@ function restoreFogFromPng(base64) {
     g.globalCompositeOperation = 'copy';
     g.drawImage(img, 0, 0, state.fog.width, state.fog.height);
     g.restore();
+    invalidate();
   };
   img.src = 'data:image/png;base64,' + base64;
 }
@@ -397,6 +399,8 @@ function handle(msg) {
   }
 
   idleEl.classList.toggle('hidden', !!(state.map && state.image));
+  // Every message changes something on screen, or might: redraw once.
+  invalidate();
 }
 
 function findDrawing(id) {
@@ -442,6 +446,7 @@ function loadImage(src, revision) {
     state.image = img;
     state.imageRevision = revision;
     idleEl.classList.add('hidden');
+    invalidate();
   };
   img.onerror = function () {
     idleHint.textContent = 'Could not load the map image.';
@@ -459,10 +464,41 @@ function argbToCss(argb) {
   return '#' + s;
 }
 
-var lastDrawAt = 0;
+/*
+ * Redraw on demand, not every frame.
+ *
+ * A frame here is a full-screen fill, the whole map image scaled with
+ * high-quality smoothing, and the whole fog mask composited on top. A desktop
+ * shrugs that off 60 times a second; a Fire TV stick took about 450 ms a frame
+ * and spent the session at 2 fps doing it for a map that was standing still.
+ *
+ * So the canvas is only repainted when something changed (a message, a
+ * resize, an image or fog mask finishing loading), and keeps repainting only
+ * while something is actually moving: the viewport easing towards its target,
+ * or a ping pulsing. Otherwise no frames are scheduled at all.
+ */
+var dirty = false;
+var dirtySince = 0;
+var framePending = false;
+
+function invalidate() {
+  if (!dirty) {
+    dirty = true;
+    dirtySince = Date.now();
+  }
+  if (!framePending) {
+    framePending = true;
+    requestAnimationFrame(onFrame);
+  }
+}
+
+function onFrame() {
+  framePending = false;
+  if (dirty) draw();
+}
 
 function draw() {
-  lastDrawAt = Date.now();
+  dirty = false;
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = '#000';
@@ -483,6 +519,8 @@ function draw() {
     if (Math.abs(t.cx - v.cx) < 0.5) v.cx = t.cx;
     if (Math.abs(t.cy - v.cy) < 0.5) v.cy = t.cy;
     if (Math.abs(t.halfH - v.halfH) < 0.5) v.halfH = t.halfH;
+    // Still gliding: ask for the next step.
+    if (v.cx !== t.cx || v.cy !== t.cy || v.halfH !== t.halfH) invalidate();
   }
 
   var view = state.view;
@@ -645,11 +683,8 @@ function drawMarks(halfH) {
 
   ctx.globalAlpha = 1;
   state.marks = alive;
-}
-
-function frameLoop() {
-  requestAnimationFrame(frameLoop);
-  draw();
+  // A ping animates for its whole life, so keep frames coming until it ends.
+  if (alive.length) invalidate();
 }
 
 /*
@@ -660,11 +695,12 @@ function frameLoop() {
  *
  * This watchdog redraws on a plain timer whenever rAF has stalled. Timers get
  * throttled too, but only to about 1 Hz, which keeps reveals appearing instead
- * of freezing. It deliberately does not re-arm rAF: that chain is still
- * pending, just slow.
+ * of freezing. It only acts when a redraw is owed and rAF has not delivered it,
+ * so an idle page stays idle. It deliberately does not re-arm rAF: that frame
+ * is still pending, just slow.
  */
 setInterval(function () {
-  if (Date.now() - lastDrawAt > 700) draw();
+  if (dirty && Date.now() - dirtySince > 700) draw();
 }, 500);
 
 function drawGrid(scale) {
@@ -909,7 +945,7 @@ function startSocketTransport() {
 /* ----------------------------- boot ------------------------------- */
 
 resize();
-requestAnimationFrame(frameLoop);
+invalidate();
 
 // A Chromecast always identifies itself with "CrKey". `?mode=cast` is an
 // escape hatch for testing the Cast path in a desktop browser.
